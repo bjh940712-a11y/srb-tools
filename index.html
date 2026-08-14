@@ -53,6 +53,7 @@
   ul.files li .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   ul.files li .tag{font-size:11px;padding:2px 7px;border-radius:20px;font-weight:600;background:#fbe8e1;color:var(--accent-dark);flex-shrink:0;}
   ul.files li .tag.fixed{background:#e4f1e6;color:var(--ok);}
+  ul.files li select{border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;background:#fff;}
   ul.files li button{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px;padding:2px 6px;border-radius:4px;}
   ul.files li button:hover{background:#eee;color:var(--text);}
   .copybar{display:flex;gap:10px;margin:10px 0;flex-wrap:wrap;}
@@ -106,10 +107,9 @@
     <ul class="files" id="pdfList"></ul>
     <div class="row">
       <button class="btn secondary" id="btnOnlyPdf">시공일지만 PDF 저장</button>
-      <button class="btn primary" id="btnMerge">시공일지 + PDF 전체 병합 저장</button>
-      <button class="btn accent2" id="btnMergeCompress">병합 + 용량 축소 저장</button>
+      <button class="btn primary" id="btnMerge">시공일지 + PDF 병합 저장</button>
     </div>
-    <div class="hint">용량 축소는 함께 첨부한 PDF만 이미지로 다시 압축합니다(시공일지 변환본은 원래 용량이 작아 화질 그대로 유지됩니다). 압축된 페이지는 텍스트 선택·검색이 되지 않으니 첨부용으로 보기만 할 때 사용하세요.</div>
+    <div class="hint">파일명 옆 콤보박스에서 파일별로 "원본유지 / 압축"을 선택할 수 있습니다. 압축은 PDF 각 페이지를 이미지로 재인코딩해 용량을 줄이지만 텍스트 선택·검색은 안 됩니다(시공일지 변환본은 원래 용량이 작아 항상 원본 화질로 유지됩니다). 사진대지·스캔 도면류는 압축을, 텍스트 위주 문서는 원본유지를 권장합니다.</div>
     <div class="log" id="log"></div>
   </div>
 
@@ -157,7 +157,9 @@ function bindDrop(dropId, inputId, handler){
 }
 bindDrop('xlsDrop','xlsInput',files=>{ if(files[0]) loadExcel(files[0]); });
 bindDrop('pdfDrop','pdfInput',files=>{
-  Array.from(files).forEach(f=>{ if(f.name.toLowerCase().endsWith('.pdf')) pdfFiles.push(f); });
+  // 파일마다 압축 여부를 개별 선택할 수 있도록 File 객체와 함께 mode('keep'|'compress')를 저장한다.
+  // 기본값은 원본유지.
+  Array.from(files).forEach(f=>{ if(f.name.toLowerCase().endsWith('.pdf')) pdfFiles.push({file:f, mode:'keep'}); });
   renderPdfList();
 });
 
@@ -361,10 +363,15 @@ function renderPdfList(){
   const head=document.createElement('li');
   head.innerHTML=`<span class="tag fixed">1</span><span class="name">공사시공일지 (엑셀 → PDF 변환본, 항상 맨 앞)</span>`;
   ul.appendChild(head);
-  pdfFiles.forEach((f,idx)=>{
+  pdfFiles.forEach((pf,idx)=>{
     const li=document.createElement('li');
-    li.innerHTML=`<span class="tag">${idx+2}</span><span class="name">${f.name}</span>
+    li.innerHTML=`<span class="tag">${idx+2}</span><span class="name">${pf.file.name}</span>
+      <select data-idx="${idx}">
+        <option value="keep" ${pf.mode==='keep'?'selected':''}>원본유지</option>
+        <option value="compress" ${pf.mode==='compress'?'selected':''}>압축</option>
+      </select>
       <button data-a="up">▲</button><button data-a="down">▼</button><button data-a="del">✕</button>`;
+    li.querySelector('select').addEventListener('change',e=>{ pf.mode = e.target.value; });
     li.querySelector('[data-a=up]').onclick=()=>{ if(idx>0){[pdfFiles[idx-1],pdfFiles[idx]]=[pdfFiles[idx],pdfFiles[idx-1]];renderPdfList();} };
     li.querySelector('[data-a=down]').onclick=()=>{ if(idx<pdfFiles.length-1){[pdfFiles[idx+1],pdfFiles[idx]]=[pdfFiles[idx],pdfFiles[idx+1]];renderPdfList();} };
     li.querySelector('[data-a=del]').onclick=()=>{ pdfFiles.splice(idx,1); renderPdfList(); };
@@ -580,19 +587,6 @@ $('btnOnlyPdf').addEventListener('click',async()=>{
   }catch(e){ log('실패: '+e.message,'err'); }
 });
 
-async function mergeAllPdfBytes(){
-  log('시공일지 PDF 변환 중...');
-  const first=await sheetToPdfBytes();
-  const merged=await PDFDocument.create();
-  const add=async bytes=>{
-    const src=await PDFDocument.load(bytes,{ignoreEncryption:true});
-    (await merged.copyPages(src,src.getPageIndices())).forEach(p=>merged.addPage(p));
-  };
-  await add(first); log('추가됨: 공사시공일지(변환본)','ok');
-  for(const f of pdfFiles){ await add(await f.arrayBuffer()); log('추가됨: '+f.name,'ok'); }
-  return merged.save();
-}
-
 function fmtMB(bytes){ return (bytes/1024/1024).toFixed(1)+'MB'; }
 
 // Rasterizes every page of a PDF and re-encodes it as a JPEG-backed page. This is the
@@ -626,41 +620,38 @@ async function compressPdfBytes(bytes, scale, quality){
   return doc.output('arraybuffer');
 }
 
+// 시공일지 변환본 + 첨부 PDF들을 하나로 병합한다. 첨부 PDF는 각 파일에 지정된 모드에 따라
+// 원본 그대로 붙이거나(keep), 이미지로 재인코딩해 압축한 뒤(compress) 붙인다.
+async function mergeAllPdfBytes(){
+  log('시공일지 PDF 변환 중...');
+  const first=await sheetToPdfBytes();
+  const merged=await PDFDocument.create();
+  const add=async bytes=>{
+    const src=await PDFDocument.load(bytes,{ignoreEncryption:true});
+    (await merged.copyPages(src,src.getPageIndices())).forEach(p=>merged.addPage(p));
+  };
+  await add(first); log('추가됨: 공사시공일지(변환본)','ok');
+  for(const pf of pdfFiles){
+    const orig = await pf.file.arrayBuffer();
+    if(pf.mode === 'compress'){
+      log(`압축 중: ${pf.file.name} ...`);
+      const compressed = await compressPdfBytes(orig, 1.5, 0.55);
+      await add(compressed);
+      log(`추가됨: ${pf.file.name} (압축, ${fmtMB(orig.byteLength)} → ${fmtMB(compressed.byteLength)})`,'ok');
+    } else {
+      await add(orig);
+      log('추가됨: '+pf.file.name,'ok');
+    }
+  }
+  return merged.save();
+}
+
 $('btnMerge').addEventListener('click',async()=>{
   try{
     const mergedBytes=await mergeAllPdfBytes();
     download(mergedBytes,`공사시공일지_첨부일체(${dateTag()}).pdf`);
     log('병합 완료: 첨부일체 PDF 저장됨','ok');
   }catch(e){ log('병합 실패: '+e.message,'err'); }
-});
-
-$('btnMergeCompress').addEventListener('click',async()=>{
-  try{
-    log('시공일지 PDF 변환 중...');
-    const first = await sheetToPdfBytes(); // 시공일지 자체는 압축하지 않음 (용량도 작고 화질 저하만 생김)
-    const merged = await PDFDocument.create();
-    const addAsIs = async bytes=>{
-      const src = await PDFDocument.load(bytes,{ignoreEncryption:true});
-      (await merged.copyPages(src,src.getPageIndices())).forEach(p=>merged.addPage(p));
-    };
-    await addAsIs(first);
-    log('추가됨: 공사시공일지 (원본 화질 유지, 압축 제외)','ok');
-
-    let totalBefore = first.byteLength, totalAfter = first.byteLength;
-    for(const f of pdfFiles){
-      const orig = await f.arrayBuffer();
-      totalBefore += orig.byteLength;
-      log(`압축 중: ${f.name} ...`);
-      const compressed = await compressPdfBytes(orig, 1.5, 0.55);
-      totalAfter += compressed.byteLength;
-      await addAsIs(compressed);
-      log(`추가됨: ${f.name} (${fmtMB(orig.byteLength)} → ${fmtMB(compressed.byteLength)})`,'ok');
-    }
-
-    const finalBytes = await merged.save();
-    download(finalBytes,`공사시공일지_첨부일체_압축(${dateTag()}).pdf`);
-    log(`전체 완료: 합계 ${fmtMB(totalBefore)} → ${fmtMB(finalBytes.byteLength)}`,'ok');
-  }catch(e){ log('병합+압축 실패: '+e.message,'err'); }
 });
 
 /* ---------- approval document (title & body) ---------- */

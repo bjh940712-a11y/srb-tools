@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>공사계획 신고/승인 작성 도우미</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg:#f7f7f5; --card:#fff; --border:#e3e1dc; --text:#2b2a27; --muted:#8a8780;
+    --accent:#c15f3c; --accent-dark:#a34e30; --ok:#4a7c59; --err:#b3432b; --blue:#3b6ea5;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;
+    background:var(--bg);color:var(--text);padding:28px 14px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  h1{font-size:22px;margin:0 0 4px;}
+  p.sub{color:var(--muted);margin:0 0 22px;font-size:13.5px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:14px;}
+  .card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+  .step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+    border-radius:50%;background:var(--accent);color:#fff;font-size:12.5px;flex-shrink:0;}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+  .row label.lbl{font-size:13px;color:var(--muted);min-width:120px;flex-shrink:0;}
+  input[type=text],input[type=number],input[type=date],select,textarea{
+    border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13.5px;flex:1;min-width:140px;
+    font-family:inherit;background:#fff;}
+  textarea{width:100%;resize:vertical;min-height:44px;}
+  .radiogrp{display:flex;gap:14px;font-size:13.5px;}
+  .radiogrp label{display:flex;align-items:center;gap:5px;cursor:pointer;}
+  button.btn{border:none;border-radius:8px;padding:10px 16px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;}
+  .btn.primary{background:var(--accent);color:#fff;}
+  .btn.primary:hover{background:var(--accent-dark);}
+  .btn.secondary{background:#eee;color:var(--text);}
+  .btn.secondary:hover{background:#e0e0e0;}
+  .btn.small{padding:6px 11px;font-size:12px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  table.editor{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;}
+  table.editor th,table.editor td{border:1px solid var(--border);padding:6px 7px;text-align:center;}
+  table.editor th{background:#f2f0ec;font-weight:600;}
+  table.editor input,table.editor select{width:100%;min-width:0;padding:5px 6px;font-size:12.5px;}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6;}
+  .sitenav{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap;}
+  .sitenav a{font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;
+    border:1.5px solid var(--border);color:var(--muted);background:#fff;transition:.15s;}
+  .sitenav a:hover{border-color:var(--accent);color:var(--accent-dark);}
+  .sitenav a.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .log{margin-top:12px;font-size:12.5px;color:var(--muted);white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.6;}
+  .log .ok{color:var(--ok);} .log .err{color:var(--err);}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;
+    padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:99;}
+  .toast.show{opacity:1;}
+  #renderHost{position:absolute;left:-99999px;top:0;background:#fff;}
+  .gantt{overflow-x:auto;margin-top:10px;}
+  .gantt table{border-collapse:collapse;font-size:11.5px;}
+  .gantt th,.gantt td{border:1px solid var(--border);padding:4px 6px;text-align:center;white-space:nowrap;}
+  .gantt th{background:#f2f0ec;}
+  .gantt td.cell{cursor:pointer;width:34px;height:26px;background:#fbfbfa;}
+  .gantt td.cell.on{background:var(--accent);}
+  .contractorbox{border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:10px;background:#fbfbfa;font-size:13px;line-height:1.9;}
+  .contractorbox b{color:var(--blue);}
+  .filerow{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12.5px;}
+  .filerow .fname{color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
+  .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;background:#e4f1e6;color:var(--ok);font-weight:600;margin-left:6px;}
+  .badge.pending{background:#fbe8e1;color:var(--accent-dark);}
+  .kv{font-size:12.5px;color:var(--muted);margin-top:4px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="sitenav">
+    <a href="index.html">① 시공일지 변환·병합</a>
+    <a href="소규모배관공사_준공도우미.html">② 소규모 배관공사 준공 도우미</a>
+    <a href="소규모포장공사_준공도우미.html">③ 소규모 포장공사 준공 도우미</a>
+    <a href="공사계획_신고승인_작성_도우미.html" class="on">④ 공사계획 신고/승인 작성 도우미</a>
+  </div>
+  <h1>공사계획 신고/승인 작성 도우미</h1>
+  <p class="sub">기본정보 입력 → 신청서(별지13·14호서식) · 공사계획서 자동 PDF 생성 → 시공업체 선택(등록증·자격증 자동 첨부) → 6종 서류 순서대로 병합. 모든 처리는 브라우저 안에서만 이루어지며, 시공업체 정보는 Firebase에 저장됩니다.</p>
+
+  <!-- 1. 기본정보 -->
+  <div class="card">
+    <h2><span class="step">1</span> 기본정보</h2>
+    <div class="row">
+      <label class="lbl">구분</label>
+      <div class="radiogrp">
+        <label><input type="radio" name="docType" value="report" checked> 신고서 (별지 제14호서식)</label>
+        <label><input type="radio" name="docType" value="approve"> 승인신청서 (별지 제13호서식)</label>
+      </div>
+    </div>
+    <div class="row">
+      <label class="lbl">최초/변경</label>
+      <div class="radiogrp" id="chgGrp">
+        <label><input type="radio" name="isChange" value="0" checked> 최초</label>
+        <label><input type="radio" name="isChange" value="1"> 변경</label>
+      </div>
+    </div>
+    <div class="row"><label class="lbl">공사명</label><input type="text" id="fProjectName" placeholder="예: 영천MOU_완산동 526-3번지~709-13번지 일원 공급관(2구간)"></div>
+    <div class="row"><label class="lbl">관할관청</label><input type="text" id="fCity" value="영천" style="max-width:160px;"><span class="kv">＝ "{관할관청} 시장 귀하"로 표시됩니다.</span></div>
+    <div class="row">
+      <label class="lbl">신고/신청일자</label>
+      <input type="date" id="fDate" style="max-width:180px;">
+      <label style="font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:5px;"><input type="checkbox" id="fDateBlank"> 일(day)은 비워두기(접수 시 수기 기재)</label>
+    </div>
+    <hr class="divider">
+    <div class="row"><label class="lbl">상호</label><input type="text" id="cName" value="서라벌도시가스(주)"></div>
+    <div class="row"><label class="lbl">대표자(성명)</label><input type="text" id="cRep" value="김준석"></div>
+    <div class="row"><label class="lbl">법인등록번호</label><input type="text" id="cRegNo" value="171211-0024180"></div>
+    <div class="row"><label class="lbl">사무소 소재지</label><input type="text" id="cAddr" value="경상북도 경주시 유림로5번길 183(용강동)"></div>
+    <div class="row"><label class="lbl">전화번호</label><input type="text" id="cTel" value="(054)778-8114"></div>
+  </div>
+
+  <!-- 2. 공사계획서 -->
+  <div class="card">
+    <h2><span class="step">2</span> 공사계획서</h2>
+    <div class="row"><label class="lbl">공사 위치</label><input type="text" id="pLoc" placeholder="예: 영천시 완산동 782-2번지 ~ 247-16번지 일원"></div>
+    <div class="row"><label class="lbl">공사 목적</label><textarea id="pPurpose" placeholder="자동생성 버튼을 눌러도 됩니다"></textarea>
+      <button class="btn secondary small" id="btnAutoPurpose">자동생성</button>
+    </div>
+    <div class="row"><label class="lbl">공사 기간</label>
+      <input type="date" id="pStart" style="max-width:170px;"> ~ <input type="date" id="pEnd" style="max-width:170px;">
+    </div>
+    <div class="row"><label class="lbl">최고사용압력</label>
+      <select id="pPressType" style="max-width:120px;"><option>저압관</option><option>중압관</option><option>고압관</option></select>
+      <input type="number" id="pPressVal" placeholder="예: 98.1" style="max-width:120px;"> <span style="font-size:13px;">KPa</span>
+    </div>
+
+    <h2 style="margin-top:18px;"><span class="step">2-1</span> 배관 내역</h2>
+    <table class="editor" id="pipeTable">
+      <thead><tr><th style="width:15%;">규모구분</th><th style="width:15%;">관종류</th><th style="width:20%;">관경</th><th style="width:20%;">길이(M)</th><th style="width:15%;"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="row"><button class="btn secondary small" id="btnAddPipeRow">+ 행 추가</button></div>
+    <div class="hint" id="pipeSummary"></div>
+
+    <h2 style="margin-top:18px;"><span class="step">2-2</span> 공사비 내역</h2>
+    <div class="row"><label class="lbl">총예상 공급관 공사비</label><input type="number" id="costTotal" placeholder="원"></div>
+    <div class="row"><label class="lbl">수요가부담 시설분담금 外</label><input type="number" id="costUser" placeholder="원"></div>
+    <div class="row"><label class="lbl">도시가스회사 부담금</label><input type="number" id="costCompany" placeholder="원"></div>
+
+    <h2 style="margin-top:18px;"><span class="step">2-3</span> 공사공정표</h2>
+    <div class="hint">공사기간을 입력하면 6일 단위 구간이 자동으로 생성됩니다. 각 공정이 진행되는 구간을 클릭해서 표시하세요.</div>
+    <div class="gantt" id="ganttHost"></div>
+  </div>
+
+  <!-- 3. 시공자/시공관리자 -->
+  <div class="card">
+    <h2><span class="step">3</span> 시공자 및 시공관리자</h2>
+    <div class="row">
+      <label class="lbl">시공업체 선택</label>
+      <select id="ctSelect" style="max-width:280px;"><option value="">(불러오는 중...)</option></select>
+      <button class="btn secondary small" id="btnReloadCt">새로고침</button>
+      <button class="btn secondary small" id="btnNewCt">+ 새 업체 등록</button>
+    </div>
+    <div class="contractorbox" id="ctPreview" style="display:none;"></div>
+    <div class="hint" id="ctFileStatus"></div>
+
+    <div id="ctEditPanel" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">
+      <h2 style="font-size:14px;"><span class="step" style="background:var(--blue);">✎</span> 업체 정보 등록/수정</h2>
+      <div class="row"><label class="lbl">상호</label><input type="text" id="ctName"></div>
+      <div class="row"><label class="lbl">대표자(연락처)</label><input type="text" id="ctRep" placeholder="예: 전영원(010-3511-6229)"></div>
+      <div class="row"><label class="lbl">사무소 소재지</label><input type="text" id="ctAddr"></div>
+      <div class="row"><label class="lbl">면허구분</label><input type="text" id="ctLicense" placeholder="예: 가스시설시공업 제 1 종"></div>
+      <div class="row"><label class="lbl">시공관리자 성명</label><input type="text" id="ctMgrName" placeholder="예: 전봉재(010-8527-6229)"></div>
+      <div class="row"><label class="lbl">생년월일</label><input type="text" id="ctMgrBirth" placeholder="예: 910314" style="max-width:140px;"></div>
+      <div class="row"><label class="lbl">주소</label><input type="text" id="ctMgrAddr"></div>
+      <div class="row"><label class="lbl">자격구분</label><input type="text" id="ctMgrQual" placeholder="예: 가스시설시공관리자(A1150333054)"></div>
+      <div class="filerow"><label class="lbl" style="min-width:120px;">전문건설업 등록증</label><input type="file" id="ctFileLicense" accept=".pdf,image/*"><span class="fname" id="ctFileLicenseName">파일 없음</span></div>
+      <div class="filerow"><label class="lbl" style="min-width:120px;">시공관리자 자격증</label><input type="file" id="ctFileCert" accept=".pdf,image/*"><span class="fname" id="ctFileCertName">파일 없음</span></div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn primary small" id="btnSaveCt">저장</button>
+        <button class="btn secondary small" id="btnCancelCt">취소</button>
+        <button class="btn secondary small" id="btnDeleteCt" style="color:var(--err);">이 업체 삭제</button>
+      </div>
+      <div class="hint">등록증·자격증 파일은 자동으로 압축되어 저장됩니다(문서당 용량 제한 때문). 스캔 화질이 아주 정밀할 필요가 없다면 원본 그대로 업로드해도 됩니다.</div>
+    </div>
+    <div class="log" id="ctLog"></div>
+  </div>
+
+  <!-- 4. 서류 생성 -->
+  <div class="card">
+    <h2><span class="step">4</span> 서류 생성</h2>
+    <div class="row">
+      <button class="btn primary" id="btnGenApp">① 신청서/신고서 PDF 생성</button>
+      <span class="badge pending" id="appStatus">미생성</span>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="btnGenPlan">② 공사계획서 PDF 생성 (공사계획서+공정표+시공자선정신고서)</button>
+      <span class="badge pending" id="planStatus">미생성</span>
+    </div>
+    <div class="log" id="genLog"></div>
+  </div>
+
+  <!-- 5. 병합 -->
+  <div class="card">
+    <h2><span class="step">5</span> 첨부파일 병합 (6종, 순서 고정)</h2>
+    <div class="hint">순서: ① 신청서/신고서 → ② 공사계획서 → ③ 전문건설업 등록증(자동) → ④ 시공관리자 자격증(자동) → ⑤ 기술검토서(1) → ⑥ 기술검토서(2)</div>
+    <div class="filerow"><label class="lbl" style="min-width:140px;">⑤ 기술검토서(1)</label><input type="file" id="reviewFile1" accept=".pdf"><span class="fname" id="reviewFile1Name">파일 없음</span></div>
+    <div class="filerow"><label class="lbl" style="min-width:140px;">⑥ 기술검토서(2)</label><input type="file" id="reviewFile2" accept=".pdf"><span class="fname" id="reviewFile2Name">파일 없음</span></div>
+    <div class="row" style="margin-top:12px;">
+      <button class="btn primary" id="btnMergeAll">6종 서류 병합 저장</button>
+    </div>
+    <div class="log" id="mergeLog"></div>
+  </div>
+</div>
+
+<div id="renderHost"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------- Firebase (기존 순회점검일지와 동일 프로젝트 재사용) ---------- */
+var firebaseConfig = {
+  apiKey: "AIzaSyCvnzRE_Rokhee4Jzhb6A6Xutm2FAJVuLY",
+  authDomain: "patrol-log-27942.firebaseapp.com",
+  projectId: "patrol-log-27942",
+  storageBucket: "patrol-log-27942.firebasestorage.app",
+  messagingSenderId: "766088948342",
+  appId: "1:766088948342:web:90e8dafe49c38fc6a74d57"
+};
+firebase.initializeApp(firebaseConfig);
+var firestoreDB = firebase.firestore();
+var CONTRACTORS_COL = "contractors";
+
+const { jsPDF } = window.jspdf;
+const { PDFDocument } = PDFLib;
+if(window.pdfjsLib){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+const $ = id => document.getElementById(id);
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+function logTo(id,msg,cls){ const d=document.createElement('div'); if(cls)d.className=cls; d.textContent=msg; $(id).appendChild(d); $(id).scrollTop=1e9; }
+function fmtWon(v){ v=Number(v||0); return v.toLocaleString()+'원'; }
+function pad2(n){ return String(n).padStart(2,'0'); }
+
+/* ================= 1. 배관내역 표 ================= */
+let pipeRows = [];
+function addPipeRow(data){
+  pipeRows.push(Object.assign({scope:'신고대상',kind:'본관',dia:'',len:''}, data||{}));
+  renderPipeTable();
+}
+function renderPipeTable(){
+  const tb = $('pipeTable').querySelector('tbody');
+  tb.innerHTML='';
+  pipeRows.forEach((r,idx)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `
+      <td><select data-f="scope"><option ${r.scope==='신고대상'?'selected':''}>신고대상</option><option ${r.scope==='비신고대상'?'selected':''}>비신고대상</option></select></td>
+      <td><select data-f="kind"><option ${r.kind==='본관'?'selected':''}>본관</option><option ${r.kind==='공급관'?'selected':''}>공급관</option></select></td>
+      <td><input type="text" data-f="dia" value="${r.dia}" placeholder="예: 225A"></td>
+      <td><input type="number" data-f="len" value="${r.len}" placeholder="M"></td>
+      <td><button class="btn secondary small" data-a="del">삭제</button></td>`;
+    tr.querySelectorAll('select,input').forEach(el=>{
+      el.addEventListener('input',()=>{ pipeRows[idx][el.dataset.f]=el.value; updatePipeSummary(); });
+      el.addEventListener('change',()=>{ pipeRows[idx][el.dataset.f]=el.value; updatePipeSummary(); });
+    });
+    tr.querySelector('[data-a=del]').addEventListener('click',()=>{ pipeRows.splice(idx,1); renderPipeTable(); });
+    tb.appendChild(tr);
+  });
+  updatePipeSummary();
+}
+function pipeGroupSummary(scope){
+  const rows = pipeRows.filter(r=>r.scope===scope && r.len);
+  if(!rows.length) return null;
+  const total = rows.reduce((s,r)=>s+Number(r.len||0),0);
+  const dias = [...new Set(rows.map(r=>r.dia).filter(Boolean))];
+  const diaLabel = dias.length ? (dias.length>1 ? dias[0]+' 외' : dias[0]) : '';
+  return {diaLabel, total};
+}
+function updatePipeSummary(){
+  const rep = pipeGroupSummary('신고대상');
+  const non = pipeGroupSummary('비신고대상');
+  let s = '';
+  if(rep) s += `신고대상 계: ${rep.diaLabel} / ${rep.total.toLocaleString()}M   `;
+  if(non) s += `비신고대상 계: ${non.diaLabel} / ${non.total.toLocaleString()}M   `;
+  const grand = (rep?rep.total:0)+(non?non.total:0);
+  s += `총 계: ${grand.toLocaleString()}M`;
+  $('pipeSummary').textContent = s;
+}
+$('btnAddPipeRow').addEventListener('click',()=>addPipeRow());
+addPipeRow({scope:'신고대상',kind:'공급관',dia:'',len:''});
+
+/* ================= 2. 공사목적 자동생성 ================= */
+$('btnAutoPurpose').addEventListener('click',()=>{
+  const loc = $('pLoc').value.trim() || '(공사 위치)';
+  $('pPurpose').value = `${loc}에 도시가스를 공급하기 위한 공사임`;
+});
+
+/* ================= 3. 공사공정표(간트) ================= */
+const GANTT_TASKS = ['배관공사','터파기 및 되메우기','비파괴 검사','전기방식공사','자체검사/뒷정리','시공감리'];
+let ganttState = {}; // "taskIdx_blockIdx" -> true
+let ganttBlocks = [];
+function computeBlocks(){
+  const s = $('pStart').value, e = $('pEnd').value;
+  ganttBlocks = [];
+  if(!s || !e) return;
+  const sd = new Date(s+'T00:00:00'), ed = new Date(e+'T00:00:00');
+  const totalDays = Math.round((ed-sd)/86400000)+1;
+  if(totalDays<=0) return;
+  let day=1;
+  while(day<=totalDays){
+    const end = Math.min(day+5, totalDays);
+    ganttBlocks.push({from:day, to:end});
+    day = end+1;
+  }
+}
+function renderGantt(){
+  computeBlocks();
+  const host = $('ganttHost');
+  if(!ganttBlocks.length){ host.innerHTML = '<div class="hint">공사기간을 먼저 입력하세요.</div>'; return; }
+  let html = '<table><thead><tr><th style="min-width:110px;">공정</th>';
+  ganttBlocks.forEach(b=>{ html += `<th>${b.from}~${b.to}일차</th>`; });
+  html += '</tr></thead><tbody>';
+  GANTT_TASKS.forEach((t,ti)=>{
+    html += `<tr><td style="text-align:left;padding-left:8px;font-weight:600;">${t}</td>`;
+    ganttBlocks.forEach((b,bi)=>{
+      const key = ti+'_'+bi;
+      const on = ganttState[key] ? ' on' : '';
+      html += `<td class="cell${on}" data-k="${key}"></td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  host.innerHTML = html;
+  host.querySelectorAll('td.cell').forEach(td=>{
+    td.addEventListener('click',()=>{
+      const k = td.dataset.k;
+      ganttState[k] = !ganttState[k];
+      td.classList.toggle('on', !!ganttState[k]);
+    });
+  });
+}
+$('pStart').addEventListener('change',renderGantt);
+$('pEnd').addEventListener('change',renderGantt);
+renderGantt();
+
+/* ================= 4. 시공업체(Firestore) ================= */
+let contractors = [];
+let currentContractor = null;
+
+async function loadContractors(){
+  try{
+    const snap = await firestoreDB.collection(CONTRACTORS_COL).get();
+    contractors = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    renderCtSelect();
+    logTo('ctLog', `업체 ${contractors.length}건 불러옴`, 'ok');
+  }catch(e){
+    logTo('ctLog', '불러오기 실패: '+e.message+' (Firestore 보안규칙에서 contractors 컬렉션 접근이 막혀 있을 수 있습니다)', 'err');
+  }
+}
+function renderCtSelect(){
+  const sel = $('ctSelect');
+  sel.innerHTML = '<option value="">-- 선택 --</option>' + contractors.map(c=>`<option value="${c.id}">${c.name||'(이름없음)'}</option>`).join('');
+  sel.value = currentContractor ? currentContractor.id : '';
+}
+$('ctSelect').addEventListener('change',()=>{
+  const id = $('ctSelect').value;
+  currentContractor = contractors.find(c=>c.id===id) || null;
+  renderCtPreview();
+});
+function renderCtPreview(){
+  const box = $('ctPreview');
+  if(!currentContractor){ box.style.display='none'; $('ctFileStatus').textContent=''; return; }
+  const c = currentContractor;
+  box.style.display='block';
+  box.innerHTML = `
+    <b>${c.name||''}</b><br>
+    대표자: ${c.rep||'-'} / 사무소소재지: ${c.addr||'-'} / 면허구분: ${c.license||'-'}<br>
+    시공관리자: ${c.mgrName||'-'} (생년월일 ${c.mgrBirth||'-'}) / 주소: ${c.mgrAddr||'-'} / 자격구분: ${c.mgrQual||'-'}`;
+  $('ctFileStatus').textContent =
+    `등록증 파일: ${c.licenseImg?'있음 (자동 첨부 가능)':'없음'} / 자격증 파일: ${c.certImg?'있음 (자동 첨부 가능)':'없음'}`;
+}
+$('btnReloadCt').addEventListener('click',loadContractors);
+loadContractors();
+
+/* ---- 업체 등록/수정 패널 ---- */
+let ctEditFiles = { licenseImg:null, certImg:null };
+$('btnNewCt').addEventListener('click',()=>{
+  $('ctEditPanel').style.display='block';
+  ['ctName','ctRep','ctAddr','ctLicense','ctMgrName','ctMgrBirth','ctMgrAddr','ctMgrQual'].forEach(id=>$(id).value='');
+  ctEditFiles = { licenseImg:null, certImg:null };
+  $('ctFileLicenseName').textContent='파일 없음';
+  $('ctFileCertName').textContent='파일 없음';
+  $('ctEditPanel').dataset.editId = '';
+});
+$('ctSelect').addEventListener('dblclick',()=>{
+  if(!currentContractor) return;
+  const c = currentContractor;
+  $('ctEditPanel').style.display='block';
+  $('ctName').value=c.name||''; $('ctRep').value=c.rep||''; $('ctAddr').value=c.addr||'';
+  $('ctLicense').value=c.license||''; $('ctMgrName').value=c.mgrName||''; $('ctMgrBirth').value=c.mgrBirth||'';
+  $('ctMgrAddr').value=c.mgrAddr||''; $('ctMgrQual').value=c.mgrQual||'';
+  ctEditFiles = { licenseImg:c.licenseImg||null, certImg:c.certImg||null };
+  $('ctFileLicenseName').textContent = c.licenseImg?'저장된 파일 있음(그대로 유지됨)':'파일 없음';
+  $('ctFileCertName').textContent = c.certImg?'저장된 파일 있음(그대로 유지됨)':'파일 없음';
+  $('ctEditPanel').dataset.editId = c.id;
+});
+$('btnCancelCt').addEventListener('click',()=>{ $('ctEditPanel').style.display='none'; });
+
+async function fileToCompressedDataURL(file, maxDim, quality){
+  maxDim = maxDim||1300; quality = quality||0.55;
+  if(file.type === 'application/pdf'){
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+    const page = await pdf.getPage(1);
+    let vp = page.getViewport({scale:1});
+    const scale = Math.min(2, maxDim/Math.max(vp.width,vp.height));
+    vp = page.getViewport({scale: Math.max(scale,0.3)});
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    await page.render({canvasContext:ctx, viewport:vp}).promise;
+    return canvas.toDataURL('image/jpeg', quality);
+  }
+  const img = await new Promise((res,rej)=>{
+    const i = new Image();
+    i.onload=()=>res(i); i.onerror=rej;
+    i.src = URL.createObjectURL(file);
+  });
+  let w=img.width, h=img.height;
+  if(w>maxDim){ h = Math.round(h*maxDim/w); w = maxDim; }
+  const canvas = document.createElement('canvas');
+  canvas.width=w; canvas.height=h;
+  canvas.getContext('2d').drawImage(img,0,0,w,h);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+$('ctFileLicense').addEventListener('change', async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  $('ctFileLicenseName').textContent = '압축 중...';
+  ctEditFiles.licenseImg = await fileToCompressedDataURL(f);
+  $('ctFileLicenseName').textContent = f.name+' (압축 완료, '+(Math.round(ctEditFiles.licenseImg.length/1024))+'KB)';
+});
+$('ctFileCert').addEventListener('change', async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  $('ctFileCertName').textContent = '압축 중...';
+  ctEditFiles.certImg = await fileToCompressedDataURL(f);
+  $('ctFileCertName').textContent = f.name+' (압축 완료, '+(Math.round(ctEditFiles.certImg.length/1024))+'KB)';
+});
+
+$('btnSaveCt').addEventListener('click', async ()=>{
+  const data = {
+    name: $('ctName').value.trim(),
+    rep: $('ctRep').value.trim(),
+    addr: $('ctAddr').value.trim(),
+    license: $('ctLicense').value.trim(),
+    mgrName: $('ctMgrName').value.trim(),
+    mgrBirth: $('ctMgrBirth').value.trim(),
+    mgrAddr: $('ctMgrAddr').value.trim(),
+    mgrQual: $('ctMgrQual').value.trim(),
+    licenseImg: ctEditFiles.licenseImg,
+    certImg: ctEditFiles.certImg,
+    updatedAt: Date.now()
+  };
+  if(!data.name){ alert('상호를 입력하세요'); return; }
+  const editId = $('ctEditPanel').dataset.editId;
+  const id = editId || data.name.replace(/[^\w가-힣]/g,'_');
+  try{
+    await firestoreDB.collection(CONTRACTORS_COL).doc(id).set(data, {merge:false});
+    logTo('ctLog','저장 완료: '+data.name,'ok');
+    $('ctEditPanel').style.display='none';
+    await loadContractors();
+    currentContractor = contractors.find(c=>c.id===id);
+    renderCtSelect(); renderCtPreview();
+  }catch(e){
+    logTo('ctLog','저장 실패: '+e.message,'err');
+  }
+});
+$('btnDeleteCt').addEventListener('click', async ()=>{
+  const editId = $('ctEditPanel').dataset.editId;
+  if(!editId){ toast('수정 중인 기존 업체가 아닙니다'); return; }
+  if(!confirm('이 업체 정보를 삭제할까요?')) return;
+  try{
+    await firestoreDB.collection(CONTRACTORS_COL).doc(editId).delete();
+    logTo('ctLog','삭제 완료','ok');
+    $('ctEditPanel').style.display='none';
+    currentContractor = null;
+    await loadContractors();
+  }catch(e){ logTo('ctLog','삭제 실패: '+e.message,'err'); }
+});
+
+/* ================= 5. PDF 렌더 유틸 (index.html과 동일 패턴) ================= */
+function addCanvasAsPages(doc, canvas, isFirstPageOfDoc){
+  const pw=595.28, ph=841.89, mg=24;
+  const imgW=pw-mg*2, pageH=ph-mg*2;
+  const fullH=canvas.height*imgW/canvas.width;
+  if(fullH<=pageH){
+    if(!isFirstPageOfDoc) doc.addPage();
+    doc.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',mg,mg,imgW,fullH);
+  }else{
+    const sliceH=Math.floor(canvas.width*pageH/imgW);
+    let y=0,first=true;
+    while(y<canvas.height){
+      const h=Math.min(sliceH,canvas.height-y);
+      const pc=document.createElement('canvas'); pc.width=canvas.width; pc.height=h;
+      pc.getContext('2d').drawImage(canvas,0,y,canvas.width,h,0,0,canvas.width,h);
+      if(!(isFirstPageOfDoc && first)) doc.addPage();
+      doc.addImage(pc.toDataURL('image/jpeg',0.92),'JPEG',mg,mg,imgW,h*imgW/canvas.width);
+      first=false; y+=h;
+    }
+  }
+}
+async function nodeToPdfBytes(nodes){
+  // nodes: array of DOM nodes, each becomes its own page-group
+  const doc = new jsPDF({orientation:'p',unit:'pt',format:'a4'});
+  const host = $('renderHost');
+  for(let i=0;i<nodes.length;i++){
+    host.innerHTML=''; host.appendChild(nodes[i]);
+    const canvas = await html2canvas(nodes[i],{scale:2, backgroundColor:'#ffffff'});
+    host.innerHTML='';
+    addCanvasAsPages(doc, canvas, i===0);
+  }
+  return doc.output('arraybuffer');
+}
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function td(v,st){ return `<td style="border:1px solid #000;padding:6px 8px;font-size:12px;${st||''}">${esc(v)}</td>`; }
+
+/* ================= 6. 신청서/신고서(별지13·14호) ================= */
+function buildAppFormNode(){
+  const isApprove = document.querySelector('input[name=docType]:checked').value === 'approve';
+  const isChange = document.querySelector('input[name=isChange]:checked').value === '1';
+  const city = $('fCity').value.trim() || 'OO';
+  const proj = $('fProjectName').value.trim() || '(공사명 미입력)';
+  const dateVal = $('fDate').value;
+  const blankDay = $('fDateBlank').checked;
+  let y='',m='',d='';
+  if(dateVal){ const parts=dateVal.split('-'); y=parts[0]; m=parts[1]; d=blankDay?'':parts[2]; }
+  const company = {
+    name: $('cName').value.trim(), rep: $('cRep').value.trim(), regNo: $('cRegNo').value.trim(),
+    addr: $('cAddr').value.trim(), tel: $('cTel').value.trim()
+  };
+
+  const formNo = isApprove ? '13' : '14';
+  const revDate = isApprove ? '2022. 5. 23.' : '2014.2.21';
+  const actorLabel = isApprove ? '신청인' : '신고인';
+  const actionWord = isApprove ? (isChange?'변경승인':'승인') : (isChange?'변경신고':'신고');
+  const titleMain = isApprove ? '승 인' : '신 고 서';
+  const checkLine1 = isApprove
+    ? `[${!isChange?'√':' '}] 승 인 신청서 &nbsp;&nbsp; [${isChange?'√':' '}] 변경승인`
+    : `[${!isChange?'√':' '}] 신 고 서 &nbsp;&nbsp; [${isChange?'√':' '}] 변경신고서`;
+  const periodText = isApprove
+    ? '산업통상자원부장관, 시·도지사: 7일, 시장·군수·구청장: 3일<br>다만, 「도시가스사업법」 제39조의2제1항제1호 및 같은 법 시행규칙 제62조의2제3항에 따른 처리기간은 22일'
+    : '즉시';
+  const contentLabel = isApprove ? `${actionWord} 내용` : `${actionWord} 내용`;
+  const lawLine = isApprove
+    ? `「도시가스사업법」 제11조제1항ㆍ제4항, 제39조의2제1항 및 같은 법 시행규칙 제12조제1항, 제62조의2제3항에 따라 위와 같이 공사계획 [${!isChange?'√':' '}]승인 [${isChange?'√':' '}]변경승인을 신청합니다.`
+    : `「도시가스사업법」 제11조제2항ㆍ제3항, 제39조의2제2항 및 같은 법 시행규칙 제12조제1항, 제62조의2제3항에 따라 위와 같이 공사계획 [${!isChange?'√':' '}]신고 [${isChange?'√':' '}]변경신고를 합니다.`;
+  const submitWord = isApprove ? '신청인' : '신고인';
+
+  const div = document.createElement('div');
+  div.style.cssText = 'width:740px;padding:26px 30px;background:#fff;font-family:"Malgun Gothic",sans-serif;font-size:13px;color:#000;line-height:1.5;';
+  div.innerHTML = `
+    <div style="font-size:11px;">■ 도시가스사업법 시행규칙 [별지 제${formNo}호서식] &lt;개정 ${revDate}&gt;</div>
+    <div style="text-align:center;margin:10px 0 4px;font-size:23px;font-weight:700;letter-spacing:2px;">공사계획 ${titleMain}</div>
+    <div style="text-align:center;font-size:13px;margin-bottom:10px;">${checkLine1}</div>
+    <div style="font-size:11px;margin-bottom:6px;">※ 바탕색이 어두운 난은 ${actorLabel}이 작성하지 않으며, [ ]에는 해당되는 곳에 √표를 합니다.</div>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>${td('접수번호','width:25%;background:#eee;')}${td('접수일자','width:25%;background:#eee;')}${td('처리기간<br>'+periodText,'background:#eee;')}</tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;border-top:none;margin-top:-1px;">
+      <tr><td rowspan="3" style="border:1px solid #000;padding:6px 8px;font-size:12px;width:12%;text-align:center;background:#eee;">${actorLabel}</td>
+        ${td('상호','width:20%;background:#eee;')}<td colspan="3" style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.name)}</td></tr>
+      <tr>${td('대표자(성명)','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.rep)}</td>
+        ${td('법인등록번호','background:#eee;width:18%;')}<td style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.regNo)}</td></tr>
+      <tr>${td('사무소 소재지','background:#eee;')}<td colspan="2" style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.addr)}</td>
+        ${td('전화번호','background:#eee;')}</tr>
+      <tr><td colspan="5" style="border:1px solid #000;padding:6px 8px;font-size:12px;text-align:right;">${esc(company.tel)}</td></tr>
+    </table>
+    <div style="margin-top:14px;font-weight:700;">${contentLabel}</div>
+    <div style="text-align:center;font-size:16px;font-weight:700;margin:8px 0 16px;">${esc(proj)}</div>
+    <div style="font-size:12.5px;line-height:1.7;">${lawLine}</div>
+    <div style="text-align:right;margin-top:20px;font-size:13px;">${y?`${y}년 ${m}월 ${d?d+'일':'&nbsp;&nbsp;일'}`:'&nbsp;'}</div>
+    <div style="text-align:right;margin-top:14px;font-size:13px;">${submitWord} ${esc(company.name)} 대표이사 ${esc(company.rep)} (서명 또는 인)</div>
+    <div style="text-align:center;margin-top:22px;font-size:19px;font-weight:700;">${esc(city)} 시 장 &nbsp;&nbsp;귀하</div>
+    <table style="width:100%;border-collapse:collapse;margin-top:20px;">
+      <tr><td style="border:1px solid #000;padding:8px;font-size:11.5px;width:70%;vertical-align:top;">
+          1. 공사계획서 1부<br>2. 공사공정표 1부<br>3. 변경사유서 1부(공사계획을 변경하는 경우만 해당합니다)<br>
+          4. 한국가스안전공사의 기술검토서 1부<br>5. 시공관리자(「건설산업기본법」 제40조에 따라 건설기술자를 말합니다)의 자격을 증명할 수 있는 서류 1부<br>
+          6. 공사 예정금액 명세서 등 해당 공사의 공사 예정금액을 증명할 수 있는 서류 사본 1부
+        </td>
+        <td style="border:1px solid #000;padding:8px;font-size:11.5px;text-align:center;vertical-align:middle;">수수료<br><br>없음</td></tr>
+      <tr><td style="border:1px solid #000;padding:8px;font-size:11px;background:#eee;">산업통상자원부장관, 시ㆍ도지사 또는 시장ㆍ군수ㆍ구청장 확인사항</td>
+        <td style="border:1px solid #000;padding:8px;font-size:11px;">「건설산업기본법」 제9조의2제1항에 따른 건설업등록증</td></tr>
+    </table>
+    <div style="margin-top:14px;font-size:12px;font-weight:700;">행정정보 공동이용 동의서</div>
+    <div style="font-size:11.5px;line-height:1.7;margin-top:4px;">
+      본인은 이 건 업무처리와 관련하여 「전자정부법」 제36조제1항에 따른 행정정보의 공동이용을 통하여 산업통상자원부장관, 시ㆍ도지사 또는 시장ㆍ군수ㆍ구청장이 위의 확인사항을 확인하는 것에 동의합니다.
+      * 동의하지 않는 경우에는 ${actorLabel}이 직접 관련 서류를 제출하여야 합니다.
+    </div>
+    <div style="text-align:right;margin-top:10px;font-size:12.5px;">${actorLabel} 법인등록번호: ${esc(company.regNo)} &nbsp;&nbsp; ${esc(company.name)} 대표이사 ${esc(company.rep)} (서명 또는 인)</div>
+    <div style="text-align:right;margin-top:18px;font-size:10.5px;color:#555;">210mm×297mm(백상지 80g/㎡)</div>
+  `;
+  return div;
+}
+
+let appFormBytes = null, planFormBytes = null;
+$('btnGenApp').addEventListener('click', async ()=>{
+  try{
+    logTo('genLog','신청서/신고서 생성 중...');
+    const node = buildAppFormNode();
+    appFormBytes = await nodeToPdfBytes([node]);
+    $('appStatus').textContent='생성 완료'; $('appStatus').className='badge';
+    logTo('genLog','신청서/신고서 PDF 생성 완료','ok');
+    download(appFormBytes, `1.공사계획_${document.querySelector('input[name=docType]:checked').value==='approve'?'승인신청서':'신고서'}(${$('fProjectName').value.trim()||'공사'}).pdf`);
+  }catch(e){ logTo('genLog','생성 실패: '+e.message,'err'); }
+});
+
+/* ================= 7. 공사계획서 + 공정표 + 시공자선정신고서 ================= */
+function buildPlanNode(){
+  const loc = $('pLoc').value.trim();
+  const purpose = $('pPurpose').value.trim();
+  const start = $('pStart').value, end = $('pEnd').value;
+  const fmtDate = v=>{ if(!v) return ''; const p=v.split('-'); return `${p[0]}년 ${p[1]}월 ${p[2]}일`; };
+  const pressType = $('pPressType').value, pressVal = $('pPressVal').value;
+
+  const repRows = pipeRows.filter(r=>r.scope==='신고대상');
+  const nonRows = pipeRows.filter(r=>r.scope==='비신고대상');
+  function pipeRowsHtml(rows, label, isFirst){
+    if(!rows.length){
+      return `<tr>${isFirst?`<td rowspan="1" style="border:1px solid #000;padding:5px;font-size:11.5px;text-align:center;">규모</td>`:''}${td(label)}${td('')}${td('')}${td('')}${td('')}${td('')}${td('')}</tr>`;
+    }
+    return rows.map((r,i)=>{
+      const isMain = r.kind==='본관';
+      return `<tr>${i===0?`<td rowspan="${rows.length}" style="border:1px solid #000;padding:5px;font-size:11.5px;text-align:center;">규모</td>`:''}
+        ${i===0?`<td rowspan="${rows.length}" style="border:1px solid #000;padding:5px;font-size:11.5px;text-align:center;">${label}</td>`:''}
+        ${td(isMain?r.dia:'')}${td(isMain?(r.len?r.len+'M':''):'')}
+        ${td(!isMain?r.dia:'')}${td(!isMain?(r.len?r.len+'M':''):'')}
+        ${td(r.dia)}${td(r.len?r.len+'M':'')}</tr>`;
+    }).join('');
+  }
+  const repSum = pipeGroupSummary('신고대상');
+  const nonSum = pipeGroupSummary('비신고대상');
+
+  const planDiv = document.createElement('div');
+  planDiv.style.cssText = 'width:740px;padding:26px 30px;background:#fff;font-family:"Malgun Gothic",sans-serif;font-size:13px;color:#000;line-height:1.6;';
+  planDiv.innerHTML = `
+    <div style="text-align:center;font-size:20px;font-weight:700;letter-spacing:8px;margin-bottom:18px;">공 사 계 획 서</div>
+    <div style="font-weight:700;margin-top:10px;">1. 공 사 위 치</div>
+    <div style="margin:4px 0 12px;">${esc(loc)}</div>
+    <div style="font-weight:700;">2. 공 사 목 적</div>
+    <div style="margin:4px 0 12px;">${esc(purpose)}</div>
+    <div style="font-weight:700;">3. 공 사 기 간</div>
+    <div style="margin:4px 0 12px;">${fmtDate(start)} ~ ${fmtDate(end)}</div>
+    <div style="font-weight:700;">4. 최 고 사 용 압 력</div>
+    <div style="margin:4px 0 12px;">${esc(pressType)} ${esc(pressVal)} KPa</div>
+    <div style="font-weight:700;margin-bottom:4px;">5. 배 관 내 역</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:12px;">
+      <tr>${td('구 분')}${td('구 분')}<td colspan="2" style="border:1px solid #000;padding:5px;font-size:11.5px;text-align:center;font-weight:700;">본 관</td>
+          <td colspan="2" style="border:1px solid #000;padding:5px;font-size:11.5px;text-align:center;font-weight:700;">공 급 관</td>
+          <td colspan="2" style="border:1px solid #000;padding:5px;font-size:11.5px;text-align:center;font-weight:700;">계 (M)</td></tr>
+      <tr>${td('')}${td('')}${td('관 경')}${td('길 이')}${td('관 경')}${td('길 이')}${td('관 경')}${td('길 이')}</tr>
+      ${pipeRowsHtml(repRows,'신고 대상',true)}
+      <tr>${td('')}${td('계')}${td('')}${td('')}${td('')}${td('')}${td(repSum?repSum.diaLabel:'')}${td(repSum?repSum.total.toLocaleString()+'M':'')}</tr>
+      ${pipeRowsHtml(nonRows,'비신고대상',false)}
+      <tr>${td('')}${td('계')}${td('')}${td('')}${td('')}${td('')}${td(nonSum?nonSum.diaLabel:'')}${td(nonSum?nonSum.total.toLocaleString()+'M':'')}</tr>
+    </table>
+    <div style="font-weight:700;margin-bottom:4px;">6. 공 사 비 내 역</div>
+    <div>총예상 공급관 공사비 : ${fmtWon($('costTotal').value)}</div>
+    <div>수요가부담 시설분담금 外 : ${fmtWon($('costUser').value)}</div>
+    <div>도시가스회사 부담금 : ${fmtWon($('costCompany').value)}</div>
+  `;
+
+  const ganttDiv = document.createElement('div');
+  ganttDiv.style.cssText = 'width:740px;padding:26px 30px;background:#fff;font-family:"Malgun Gothic",sans-serif;font-size:13px;color:#000;';
+  let ganttRows = '';
+  GANTT_TASKS.forEach((t,ti)=>{
+    ganttRows += `<tr>${td(t,'font-weight:700;')}`;
+    ganttBlocks.forEach((b,bi)=>{
+      const on = ganttState[ti+'_'+bi];
+      ganttRows += `<td style="border:1px solid #000;padding:5px;text-align:center;${on?'background:#c15f3c;':''}"></td>`;
+    });
+    ganttRows += '</tr>';
+  });
+  const blockHeaders = ganttBlocks.map(b=>td(`${b.from}~${b.to}일차`)).join('');
+  ganttDiv.innerHTML = `
+    <div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:16px;">공 사 공 정 표</div>
+    <div style="margin-bottom:10px;">공사기간(착공일로부터): ${fmtDate(start)} ~ ${fmtDate(end)}</div>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>${td('공 정')}${blockHeaders}</tr>
+      ${ganttRows}
+    </table>
+  `;
+
+  const c = currentContractor || {};
+  const submitDate = $('fDate').value ? (()=>{const p=$('fDate').value.split('-');return `${p[0]} 년 ${p[1]} 월 &nbsp;&nbsp;일`;})() : '&nbsp;';
+  const company = { name: $('cName').value.trim(), rep: $('cRep').value.trim(), addr: $('cAddr').value.trim() };
+  const city = $('fCity').value.trim() || 'OO';
+  const proj = $('fProjectName').value.trim();
+  const ctDiv = document.createElement('div');
+  ctDiv.style.cssText = 'width:740px;padding:26px 30px;background:#fff;font-family:"Malgun Gothic",sans-serif;font-size:13px;color:#000;line-height:1.7;';
+  ctDiv.innerHTML = `
+    <div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:18px;">시공자 및 시공관리자 선정 신고서</div>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>${td('공 사 명','background:#eee;width:15%;')}<td colspan="2" style="border:1px solid #000;padding:6px 8px;">${esc(proj)}</td></tr>
+      <tr><td rowspan="4" style="border:1px solid #000;padding:6px 8px;text-align:center;background:#eee;">시<br>공<br>자</td>
+        ${td('상 호','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.name||'')}</td></tr>
+      <tr>${td('대 표 자','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.rep||'')}</td></tr>
+      <tr>${td('사무소 소재지','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.addr||'')}</td></tr>
+      <tr>${td('면 허 구 분','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.license||'')}</td></tr>
+      <tr><td rowspan="4" style="border:1px solid #000;padding:6px 8px;text-align:center;background:#eee;">시공관리자</td>
+        ${td('성 명','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.mgrName||'')}</td></tr>
+      <tr>${td('생년월일','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.mgrBirth||'')}</td></tr>
+      <tr>${td('주 소','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.mgrAddr||'')}</td></tr>
+      <tr>${td('자 격 구 분','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;">${esc(c.mgrQual||'')}</td></tr>
+    </table>
+    <div style="margin-top:16px;font-size:12.5px;line-height:1.8;">
+      도시가스사업법 시행규칙 제18조의2 규정에 의거 상기와 같이 가스시설시공업자 및 시공관리자를 선정하였기에 신고합니다.
+    </div>
+    <div style="text-align:center;margin-top:14px;">${submitDate}</div>
+    <div style="margin-top:14px;">신 청 인 : ${esc(company.addr)}<br>${esc(company.name)}<br>대표이사 ${esc(company.rep)} (인)</div>
+    <div style="text-align:center;margin-top:18px;font-size:17px;font-weight:700;">${esc(city)} 시 장 &nbsp;&nbsp;귀하</div>
+    <div style="margin-top:18px;font-size:12px;">첨 부<br>1. 가스시설 시공업 등록필증 사본<br>2. 자격증 사본 (원본대조필)</div>
+  `;
+
+  return [planDiv, ganttDiv, ctDiv];
+}
+
+$('btnGenPlan').addEventListener('click', async ()=>{
+  try{
+    logTo('genLog','공사계획서 생성 중...');
+    const nodes = buildPlanNode();
+    planFormBytes = await nodeToPdfBytes(nodes);
+    $('planStatus').textContent='생성 완료'; $('planStatus').className='badge';
+    logTo('genLog','공사계획서 PDF 생성 완료','ok');
+    download(planFormBytes, `2.공사계획서(${$('fProjectName').value.trim()||'공사'}).pdf`);
+  }catch(e){ logTo('genLog','생성 실패: '+e.message,'err'); }
+});
+
+function download(bytes,filename){
+  const blob=new Blob([bytes],{type:'application/pdf'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),5000);
+}
+
+/* ================= 8. 6종 서류 병합 ================= */
+async function imageDataURLToPdfBytes(dataURL){
+  const img = await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=dataURL; });
+  const orientation = img.width>img.height ? 'l':'p';
+  const doc = new jsPDF({orientation, unit:'pt', format:[img.width*0.75, img.height*0.75]});
+  doc.addImage(dataURL,'JPEG',0,0,img.width*0.75,img.height*0.75);
+  return doc.output('arraybuffer');
+}
+
+$('reviewFile1').addEventListener('change',e=>{ $('reviewFile1Name').textContent = e.target.files[0]?e.target.files[0].name:'파일 없음'; });
+$('reviewFile2').addEventListener('change',e=>{ $('reviewFile2Name').textContent = e.target.files[0]?e.target.files[0].name:'파일 없음'; });
+
+$('btnMergeAll').addEventListener('click', async ()=>{
+  try{
+    const merged = await PDFDocument.create();
+    const addBytes = async bytes=>{
+      const src = await PDFDocument.load(bytes,{ignoreEncryption:true});
+      (await merged.copyPages(src, src.getPageIndices())).forEach(p=>merged.addPage(p));
+    };
+    if(!appFormBytes){ logTo('mergeLog','① 신청서/신고서를 먼저 생성하세요','err'); return; }
+    if(!planFormBytes){ logTo('mergeLog','② 공사계획서를 먼저 생성하세요','err'); return; }
+    logTo('mergeLog','① 신청서/신고서 추가 중...');
+    await addBytes(appFormBytes);
+    logTo('mergeLog','② 공사계획서 추가 중...');
+    await addBytes(planFormBytes);
+
+    const c = currentContractor;
+    if(c && c.licenseImg){
+      logTo('mergeLog','③ 전문건설업 등록증 추가 중...');
+      await addBytes(await imageDataURLToPdfBytes(c.licenseImg));
+    } else {
+      logTo('mergeLog','③ 전문건설업 등록증: 선택된 업체에 저장된 파일이 없어 건너뜁니다','err');
+    }
+    if(c && c.certImg){
+      logTo('mergeLog','④ 시공관리자 자격증 추가 중...');
+      await addBytes(await imageDataURLToPdfBytes(c.certImg));
+    } else {
+      logTo('mergeLog','④ 시공관리자 자격증: 선택된 업체에 저장된 파일이 없어 건너뜁니다','err');
+    }
+    const f1 = $('reviewFile1').files[0], f2 = $('reviewFile2').files[0];
+    if(f1){ logTo('mergeLog','⑤ 기술검토서(1) 추가 중...'); await addBytes(await f1.arrayBuffer()); }
+    else logTo('mergeLog','⑤ 기술검토서(1): 업로드되지 않아 건너뜁니다','err');
+    if(f2){ logTo('mergeLog','⑥ 기술검토서(2) 추가 중...'); await addBytes(await f2.arrayBuffer()); }
+    else logTo('mergeLog','⑥ 기술검토서(2): 업로드되지 않아 건너뜁니다','err');
+
+    const bytes = await merged.save();
+    download(bytes, `공사계획_첨부일체(${$('fProjectName').value.trim()||'공사'}).pdf`);
+    logTo('mergeLog','병합 완료','ok');
+  }catch(e){ logTo('mergeLog','병합 실패: '+e.message,'err'); }
+});
+</script>
+</body>
+</html>

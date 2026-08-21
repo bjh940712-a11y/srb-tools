@@ -86,33 +86,21 @@
   <!-- 1. 기본정보 -->
   <div class="card">
     <h2><span class="step">1</span> 기본정보</h2>
+    <div class="hint">신청서/신고서는 실제 제출하시는 원본 서식 파일(template_report.pdf / template_approve.pdf) 위에 <b>공사명</b>과 <b>작성년월</b> 딱 두 곳만 새로 그려 넣는 방식이라, 나머지 글자·표·서명란·checkbox 위치는 원본과 100% 동일합니다.</div>
     <div class="row">
       <label class="lbl">구분</label>
       <div class="radiogrp">
         <label><input type="radio" name="docType" value="report" checked> 신고서 (별지 제14호서식)</label>
-        <label><input type="radio" name="docType" value="approve"> 승인신청서 (별지 제13호서식)</label>
-      </div>
-    </div>
-    <div class="row">
-      <label class="lbl">최초/변경</label>
-      <div class="radiogrp" id="chgGrp">
-        <label><input type="radio" name="isChange" value="0" checked> 최초</label>
-        <label><input type="radio" name="isChange" value="1"> 변경</label>
+        <label><input type="radio" name="docType" value="approve"> 변경승인 신청서 (별지 제13호서식)</label>
       </div>
     </div>
     <div class="row"><label class="lbl">공사명</label><input type="text" id="fProjectName" placeholder="예: 영천MOU_완산동 526-3번지~709-13번지 일원 공급관(2구간)"></div>
-    <div class="row"><label class="lbl">관할관청</label><input type="text" id="fCity" value="영천" style="max-width:160px;"><span class="kv">＝ "{관할관청} 시장 귀하"로 표시됩니다.</span></div>
     <div class="row">
-      <label class="lbl">신고/신청일자</label>
-      <input type="date" id="fDate" style="max-width:180px;">
-      <label style="font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:5px;"><input type="checkbox" id="fDateBlank"> 일(day)은 비워두기(접수 시 수기 기재)</label>
+      <label class="lbl">작성년월</label>
+      <input type="month" id="fMonth" style="max-width:160px;">
+      <span class="kv">일(day)은 원본 서식과 동일하게 항상 비워둡니다.</span>
     </div>
-    <hr class="divider">
-    <div class="row"><label class="lbl">상호</label><input type="text" id="cName" value="서라벌도시가스(주)"></div>
-    <div class="row"><label class="lbl">대표자(성명)</label><input type="text" id="cRep" value="김준석"></div>
-    <div class="row"><label class="lbl">법인등록번호</label><input type="text" id="cRegNo" value="171211-0024180"></div>
-    <div class="row"><label class="lbl">사무소 소재지</label><input type="text" id="cAddr" value="경상북도 경주시 유림로5번길 183(용강동)"></div>
-    <div class="row"><label class="lbl">전화번호</label><input type="text" id="cTel" value="(054)778-8114"></div>
+    <div class="hint">관할관청(영천 시장)·회사정보(서라벌도시가스(주))·checkbox 선택 등은 업로드하신 실제 제출본 그대로 고정되어 있습니다. 다른 지자체에 제출하거나 신고/승인 종류가 다르면 말씀해 주세요 — 서식을 추가해 드릴게요.</div>
   </div>
 
   <!-- 2. 공사계획서 -->
@@ -236,6 +224,10 @@ function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('sho
 function logTo(id,msg,cls){ const d=document.createElement('div'); if(cls)d.className=cls; d.textContent=msg; $(id).appendChild(d); $(id).scrollTop=1e9; }
 function fmtWon(v){ v=Number(v||0); return v.toLocaleString()+'원'; }
 function pad2(n){ return String(n).padStart(2,'0'); }
+// 신청서(별지13·14호)는 실제 제출본 PDF를 그대로 쓰므로 회사정보가 필요없지만, 공사계획서/
+// 시공자선정신고서 쪽 텍스트에는 계속 쓰인다. 회사가 바뀌지 않는 한 고정값으로 둔다.
+const COMPANY_FIXED = { name:'서라벌도시가스(주)', rep:'김준석', regNo:'171211-0024180', addr:'경상북도 경주시 유림로5번길 183(용강동)', tel:'(054)778-8114' };
+const CITY_FIXED = '영천';
 
 /* ================= 1. 배관내역 표 ================= */
 let pipeRows = [];
@@ -520,93 +512,110 @@ async function nodeToPdfBytes(nodes){
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 function td(v,st){ return `<td style="border:1px solid #000;padding:6px 8px;font-size:12px;${st||''}">${esc(v)}</td>`; }
 
-/* ================= 6. 신청서/신고서(별지13·14호) ================= */
-function buildAppFormNode(){
+/* ================= 6. 신청서/신고서(별지13·14호) - 실제 제출본 PDF 위에 공사명·작성년월만 덮어쓰기 ================= */
+// 좌표는 실제로 주신 제출본 샘플 PDF(1.공사계획신고서..., [별지제13호서식]...)을 그대로 분석해서 얻은
+// "공사명 값"과 "작성년월일 값"의 정확한 위치다(PDF 포인트 좌표, 1pt = 1/72in, y는 페이지 아래쪽이 0).
+// 이 좌표에만 흰 박스를 덮고 새 글자를 그려 넣으므로, 그 외 모든 글자·표·checkbox·서명란은
+// 원본 파일과 100% 동일하게 유지된다.
+const APP_TEMPLATES = {
+  report: {
+    file: 'template_report.pdf',
+    // 공사명 값이 있던 자리: x 155~528, PDF y 540~567 (신고(변경신고) 내용 라벨 바로 아래 줄)
+    nameBox: { x0:155, x1:528, yBottom:540, yTop:567, baseline:550, fontSize:12.5 },
+    // 작성년월일이 있던 자리("2026 년 08 월    일" 형태, 일자는 항상 공란)
+    dateBox: { x0:396, x1:528, yBottom:456, yTop:478, baseline:466, fontSize:10.5 }
+  },
+  approve: {
+    file: 'template_approve.pdf',
+    nameBox: { x0:150, x1:528, yBottom:586, yTop:611, baseline:596, fontSize:11.5 },
+    dateBox: { x0:396, x1:528, yBottom:516, yTop:538, baseline:526, fontSize:10.5 }
+  }
+};
+
+async function fetchTemplateBytes(url){
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(`템플릿 파일(${url})을 불러오지 못했습니다 (같은 폴더에 업로드되어 있는지 확인하세요)`);
+  return res.arrayBuffer();
+}
+
+// PDF 포인트 좌표 -> 캔버스 픽셀 좌표 변환 (scale = 캔버스 렌더링 배율, 페이지 높이 841.89pt 기준)
+function pdfToCanvasBox(box, scale, pageHeight){
+  const x = box.x0*scale, w = (box.x1-box.x0)*scale;
+  const yTopPx = (pageHeight - box.yTop)*scale;
+  const hPx = (box.yTop-box.yBottom)*scale;
+  const baselinePx = (pageHeight - box.baseline)*scale;
+  return { x, w, yTopPx, hPx, baselinePx };
+}
+
+// 지정한 폭 안에 들어가도록 폰트 크기를 줄여가며 중앙정렬로 그린다.
+function fitTextCentered(ctx, text, centerX, baselineY, maxWidth, startSize){
+  let size = startSize;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#000';
+  while(size > 6){
+    ctx.font = `${size}px "Malgun Gothic","맑은 고딕",sans-serif`;
+    if(ctx.measureText(text).width <= maxWidth) break;
+    size -= 0.5;
+  }
+  ctx.fillText(text, centerX, baselineY);
+}
+function drawTextLeft(ctx, text, x, baselineY, fontSize){
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#000';
+  ctx.font = `${fontSize}px "Malgun Gothic","맑은 고딕",sans-serif`;
+  ctx.fillText(text, x, baselineY);
+}
+
+async function buildAppFormBytes(){
   const isApprove = document.querySelector('input[name=docType]:checked').value === 'approve';
-  const isChange = document.querySelector('input[name=isChange]:checked').value === '1';
-  const city = $('fCity').value.trim() || 'OO';
-  const proj = $('fProjectName').value.trim() || '(공사명 미입력)';
-  const dateVal = $('fDate').value;
-  const blankDay = $('fDateBlank').checked;
-  let y='',m='',d='';
-  if(dateVal){ const parts=dateVal.split('-'); y=parts[0]; m=parts[1]; d=blankDay?'':parts[2]; }
-  const company = {
-    name: $('cName').value.trim(), rep: $('cRep').value.trim(), regNo: $('cRegNo').value.trim(),
-    addr: $('cAddr').value.trim(), tel: $('cTel').value.trim()
-  };
+  const tpl = isApprove ? APP_TEMPLATES.approve : APP_TEMPLATES.report;
+  const proj = $('fProjectName').value.trim();
+  if(!proj) throw new Error('공사명을 입력하세요');
+  const monthVal = $('fMonth').value; // "YYYY-MM"
+  if(!monthVal) throw new Error('작성년월을 입력하세요');
+  const [yy, mm] = monthVal.split('-');
+  const dateText = `${yy} 년  ${mm} 월     일`;
 
-  const formNo = isApprove ? '13' : '14';
-  const revDate = isApprove ? '2022. 5. 23.' : '2014.2.21';
-  const actorLabel = isApprove ? '신청인' : '신고인';
-  const actionWord = isApprove ? (isChange?'변경승인':'승인') : (isChange?'변경신고':'신고');
-  const titleMain = isApprove ? '승 인' : '신 고 서';
-  const checkLine1 = isApprove
-    ? `[${!isChange?'√':' '}] 승 인 신청서 &nbsp;&nbsp; [${isChange?'√':' '}] 변경승인`
-    : `[${!isChange?'√':' '}] 신 고 서 &nbsp;&nbsp; [${isChange?'√':' '}] 변경신고서`;
-  const periodText = isApprove
-    ? '산업통상자원부장관, 시·도지사: 7일, 시장·군수·구청장: 3일<br>다만, 「도시가스사업법」 제39조의2제1항제1호 및 같은 법 시행규칙 제62조의2제3항에 따른 처리기간은 22일'
-    : '즉시';
-  const contentLabel = isApprove ? `${actionWord} 내용` : `${actionWord} 내용`;
-  const lawLine = isApprove
-    ? `「도시가스사업법」 제11조제1항ㆍ제4항, 제39조의2제1항 및 같은 법 시행규칙 제12조제1항, 제62조의2제3항에 따라 위와 같이 공사계획 [${!isChange?'√':' '}]승인 [${isChange?'√':' '}]변경승인을 신청합니다.`
-    : `「도시가스사업법」 제11조제2항ㆍ제3항, 제39조의2제2항 및 같은 법 시행규칙 제12조제1항, 제62조의2제3항에 따라 위와 같이 공사계획 [${!isChange?'√':' '}]신고 [${isChange?'√':' '}]변경신고를 합니다.`;
-  const submitWord = isApprove ? '신청인' : '신고인';
+  const bytes = await fetchTemplateBytes(tpl.file);
+  const pdf = await pdfjsLib.getDocument({data: bytes}).promise;
+  const page = await pdf.getPage(1);
+  const scale = 3; // 고해상도 렌더링(선명한 출력을 위해)
+  const viewport = page.getViewport({scale});
+  const pageHeightPt = page.getViewport({scale:1}).height;
 
-  const div = document.createElement('div');
-  div.style.cssText = 'width:740px;padding:26px 30px;background:#fff;font-family:"Malgun Gothic",sans-serif;font-size:13px;color:#000;line-height:1.5;';
-  div.innerHTML = `
-    <div style="font-size:11px;">■ 도시가스사업법 시행규칙 [별지 제${formNo}호서식] &lt;개정 ${revDate}&gt;</div>
-    <div style="text-align:center;margin:10px 0 4px;font-size:23px;font-weight:700;letter-spacing:2px;">공사계획 ${titleMain}</div>
-    <div style="text-align:center;font-size:13px;margin-bottom:10px;">${checkLine1}</div>
-    <div style="font-size:11px;margin-bottom:6px;">※ 바탕색이 어두운 난은 ${actorLabel}이 작성하지 않으며, [ ]에는 해당되는 곳에 √표를 합니다.</div>
-    <table style="width:100%;border-collapse:collapse;">
-      <tr>${td('접수번호','width:25%;background:#eee;')}${td('접수일자','width:25%;background:#eee;')}${td('처리기간<br>'+periodText,'background:#eee;')}</tr>
-    </table>
-    <table style="width:100%;border-collapse:collapse;border-top:none;margin-top:-1px;">
-      <tr><td rowspan="3" style="border:1px solid #000;padding:6px 8px;font-size:12px;width:12%;text-align:center;background:#eee;">${actorLabel}</td>
-        ${td('상호','width:20%;background:#eee;')}<td colspan="3" style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.name)}</td></tr>
-      <tr>${td('대표자(성명)','background:#eee;')}<td style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.rep)}</td>
-        ${td('법인등록번호','background:#eee;width:18%;')}<td style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.regNo)}</td></tr>
-      <tr>${td('사무소 소재지','background:#eee;')}<td colspan="2" style="border:1px solid #000;padding:6px 8px;font-size:12px;">${esc(company.addr)}</td>
-        ${td('전화번호','background:#eee;')}</tr>
-      <tr><td colspan="5" style="border:1px solid #000;padding:6px 8px;font-size:12px;text-align:right;">${esc(company.tel)}</td></tr>
-    </table>
-    <div style="margin-top:14px;font-weight:700;">${contentLabel}</div>
-    <div style="text-align:center;font-size:16px;font-weight:700;margin:8px 0 16px;">${esc(proj)}</div>
-    <div style="font-size:12.5px;line-height:1.7;">${lawLine}</div>
-    <div style="text-align:right;margin-top:20px;font-size:13px;">${y?`${y}년 ${m}월 ${d?d+'일':'&nbsp;&nbsp;일'}`:'&nbsp;'}</div>
-    <div style="text-align:right;margin-top:14px;font-size:13px;">${submitWord} ${esc(company.name)} 대표이사 ${esc(company.rep)} (서명 또는 인)</div>
-    <div style="text-align:center;margin-top:22px;font-size:19px;font-weight:700;">${esc(city)} 시 장 &nbsp;&nbsp;귀하</div>
-    <table style="width:100%;border-collapse:collapse;margin-top:20px;">
-      <tr><td style="border:1px solid #000;padding:8px;font-size:11.5px;width:70%;vertical-align:top;">
-          1. 공사계획서 1부<br>2. 공사공정표 1부<br>3. 변경사유서 1부(공사계획을 변경하는 경우만 해당합니다)<br>
-          4. 한국가스안전공사의 기술검토서 1부<br>5. 시공관리자(「건설산업기본법」 제40조에 따라 건설기술자를 말합니다)의 자격을 증명할 수 있는 서류 1부<br>
-          6. 공사 예정금액 명세서 등 해당 공사의 공사 예정금액을 증명할 수 있는 서류 사본 1부
-        </td>
-        <td style="border:1px solid #000;padding:8px;font-size:11.5px;text-align:center;vertical-align:middle;">수수료<br><br>없음</td></tr>
-      <tr><td style="border:1px solid #000;padding:8px;font-size:11px;background:#eee;">산업통상자원부장관, 시ㆍ도지사 또는 시장ㆍ군수ㆍ구청장 확인사항</td>
-        <td style="border:1px solid #000;padding:8px;font-size:11px;">「건설산업기본법」 제9조의2제1항에 따른 건설업등록증</td></tr>
-    </table>
-    <div style="margin-top:14px;font-size:12px;font-weight:700;">행정정보 공동이용 동의서</div>
-    <div style="font-size:11.5px;line-height:1.7;margin-top:4px;">
-      본인은 이 건 업무처리와 관련하여 「전자정부법」 제36조제1항에 따른 행정정보의 공동이용을 통하여 산업통상자원부장관, 시ㆍ도지사 또는 시장ㆍ군수ㆍ구청장이 위의 확인사항을 확인하는 것에 동의합니다.
-      * 동의하지 않는 경우에는 ${actorLabel}이 직접 관련 서류를 제출하여야 합니다.
-    </div>
-    <div style="text-align:right;margin-top:10px;font-size:12.5px;">${actorLabel} 법인등록번호: ${esc(company.regNo)} &nbsp;&nbsp; ${esc(company.name)} 대표이사 ${esc(company.rep)} (서명 또는 인)</div>
-    <div style="text-align:right;margin-top:18px;font-size:10.5px;color:#555;">210mm×297mm(백상지 80g/㎡)</div>
-  `;
-  return div;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  await page.render({canvasContext: ctx, viewport}).promise;
+
+  // 1) 기존 공사명/날짜 글자를 흰색 박스로 지운다
+  [tpl.nameBox, tpl.dateBox].forEach(box=>{
+    const b = pdfToCanvasBox(box, scale, pageHeightPt);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(b.x, b.yTopPx, b.w, b.hPx);
+  });
+
+  // 2) 새 공사명(중앙정렬, 폭 안에 자동으로 글자크기 줄여서 맞춤)
+  const nb = pdfToCanvasBox(tpl.nameBox, scale, pageHeightPt);
+  fitTextCentered(ctx, proj, nb.x + nb.w/2, nb.baselinePx, nb.w - 8*scale, tpl.nameBox.fontSize*scale);
+
+  // 3) 새 작성년월(왼쪽정렬, 원본과 같은 시작 위치)
+  const db = pdfToCanvasBox(tpl.dateBox, scale, pageHeightPt);
+  drawTextLeft(ctx, dateText, db.x, db.baselinePx, tpl.dateBox.fontSize*scale);
+
+  const doc = new jsPDF({orientation:'p', unit:'pt', format:[viewport.width/scale, viewport.height/scale]});
+  doc.addImage(canvas.toDataURL('image/jpeg',0.95),'JPEG',0,0,viewport.width/scale,viewport.height/scale);
+  return doc.output('arraybuffer');
 }
 
 let appFormBytes = null, planFormBytes = null;
 $('btnGenApp').addEventListener('click', async ()=>{
   try{
-    logTo('genLog','신청서/신고서 생성 중...');
-    const node = buildAppFormNode();
-    appFormBytes = await nodeToPdfBytes([node]);
+    logTo('genLog','신청서/신고서 생성 중... (원본 서식 불러오는 중)');
+    appFormBytes = await buildAppFormBytes();
     $('appStatus').textContent='생성 완료'; $('appStatus').className='badge';
-    logTo('genLog','신청서/신고서 PDF 생성 완료','ok');
-    download(appFormBytes, `1.공사계획_${document.querySelector('input[name=docType]:checked').value==='approve'?'승인신청서':'신고서'}(${$('fProjectName').value.trim()||'공사'}).pdf`);
+    logTo('genLog','신청서/신고서 PDF 생성 완료 (원본 서식 그대로, 공사명·작성년월만 반영)','ok');
+    download(appFormBytes, `1.공사계획_${document.querySelector('input[name=docType]:checked').value==='approve'?'변경승인신청서':'신고서'}(${$('fProjectName').value.trim()||'공사'}).pdf`);
   }catch(e){ logTo('genLog','생성 실패: '+e.message,'err'); }
 });
 
@@ -687,9 +696,10 @@ function buildPlanNode(){
   `;
 
   const c = currentContractor || {};
-  const submitDate = $('fDate').value ? (()=>{const p=$('fDate').value.split('-');return `${p[0]} 년 ${p[1]} 월 &nbsp;&nbsp;일`;})() : '&nbsp;';
-  const company = { name: $('cName').value.trim(), rep: $('cRep').value.trim(), addr: $('cAddr').value.trim() };
-  const city = $('fCity').value.trim() || 'OO';
+  const monthVal = $('fMonth').value;
+  const submitDate = monthVal ? (()=>{const p=monthVal.split('-');return `${p[0]} 년 ${p[1]} 월 &nbsp;&nbsp;일`;})() : '&nbsp;';
+  const company = COMPANY_FIXED;
+  const city = CITY_FIXED;
   const proj = $('fProjectName').value.trim();
   const ctDiv = document.createElement('div');
   ctDiv.style.cssText = 'width:740px;padding:26px 30px;background:#fff;font-family:"Malgun Gothic",sans-serif;font-size:13px;color:#000;line-height:1.7;';

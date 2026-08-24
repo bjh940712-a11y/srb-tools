@@ -129,7 +129,7 @@
       <tbody></tbody>
     </table>
     <div class="row"><button class="btn secondary small" id="btnAddPipeRow">+ 행 추가</button></div>
-    <div class="hint" id="pipeSummary">신고대상 최대 6행, 비신고대상 최대 3행까지 서식에 들어갑니다(그 이상은 서식을 넓혀드릴 수 있으니 말씀해주세요).</div>
+    <div class="hint" id="pipeSummary">신고대상 최대 4행, 비신고대상 최대 1행까지 서식에 들어갑니다(원본 서식 표 크기 그대로이며, 그 이상은 서식을 넓혀드릴 수 있으니 말씀해주세요).</div>
 
     <h2 style="margin-top:18px;"><span class="step">2-2</span> 공사비 내역</h2>
     <div class="row"><label class="lbl">총예상 공급관 공사비</label><input type="number" id="costTotal" placeholder="원"></div>
@@ -685,20 +685,32 @@ $('btnGenApp').addEventListener('click', async ()=>{
 });
 
 /* ================= 7. 공사계획서 + 공정표 + 시공자선정신고서 =================
-   실제 양식(template_plan.pdf, 3페이지)을 그대로 배경으로 쓰고, 작성해야 하는 곳에만
-   값을 그려 넣는다. 좌표는 이 템플릿을 직접 만들 때 사용한 값과 정확히 동일하다. */
+   실제로 사용하시던 2.공사계획서.doc 원본을 그대로 PDF화한 template_plan.pdf(3페이지)를
+   배경으로 쓰고, 작성해야 하는 곳에만 값을 그려 넣는다. 좌표는 원본 doc 파일의 문단/표
+   좌표를 pdfjs로 직접 추출해서 얻은 실측값이다(라벨/표/서명란은 원본과 100% 동일하게 유지). */
 const PLAN_TEMPLATE_FILE = 'template_plan.pdf';
 const PLAN_P1 = {
-  loc:{x:78,y:709.89}, purposeLines:[{x:78,y:683.89},{x:78,y:667.89}],
-  period:{x:78,y:625.89}, pressure:{x:78,y:599.89},
-  colX:[60,100,160,222.5,285,347.5,410,472.5,535], dataTop:545.89, rowH:14, nReport:6, nNonreport:3,
-  cost1:{x:199.5,y:345.89}, cost2:{x:220.5,y:327.89}, cost3:{x:194.25,y:309.89}
+  valueX:88,
+  loc:{y:574.7}, purposeLines:[{y:517.4},{y:502.4}],
+  period:{y:460.1}, pressure:{y:402.8},
+  // 배관내역 표: 열 중심 x좌표(본관 관경/길이, 공급관 관경/길이, 계 관경/길이), 행 y좌표(신고대상 4행, 계, 비신고대상 1행)
+  colCx:[161.4, 231.1, 300.8, 370.6, 440.3, 510.0],
+  reportRowY:[301.3, 278.6, 255.9, 233.2], sumRowY:210.5, nonreportRowY:187.8,
+  nReport:4, nNonreport:1,
+  cost1:{x:222,y:97.2}, cost2:{x:240,y:71.9}, cost3:{x:222,y:46.6}
 };
-const PLAN_P2 = { period:{x:186.75,y:731.89}, gx:[60,150,227,304,381,458,535], gTop:705.89, headH:26, rowH2:40 };
+const PLAN_P2 = {
+  dateCx:342, dateY:551.6,
+  segCx:[176, 244, 311, 378, 449],
+  // 6개 공정 카테고리(배관공사/터파기및되메우기/비파괴검사/전기방식공사/자체검사뒷정리/시공감리)의 행 중심 y
+  catY:[482.6, 432.8, 384.3, 335.9, 287.6, 239.1]
+};
 const PLAN_P3 = {
-  name:{x:215,y:694.89}, fieldX:215,
-  fieldYs:[668.89,642.89,616.89,590.89,564.89,538.89,512.89,486.89], // 상호,대표자,사무소소재지,면허구분,성명,생년월일,주소,자격구분
-  dateCx:297.64, dateY:400, submit:{x:158.5,y:355.89}, companyY:331.89, repY:307.89
+  valueX:275,
+  nameY:670.0,
+  fieldYs:[641.2, 610.5, 579.9, 549.2, 518.5, 487.8, 457.2, 426.5], // 상호,대표자,사무소소재지,면허구분,성명,생년월일,주소,자격구분
+  yyX:339, mmX:358, dateY:300.3
+  // 신청인 주소/서라벌도시가스(주)/대표이사/영천시장귀하 문구는 원본 서식에 이미 고정 인쇄되어 있어 덮어쓰지 않는다.
 };
 function fmtDatePeriod(v){ if(!v) return ''; const p=v.split('-'); return `${p[0]}.${p[1]}.${p[2]}`; }
 
@@ -750,9 +762,9 @@ async function buildPlanBytes(){
   {
     const {canvas, ctx, toPx, drawL, drawFitL} = await renderBaseCanvas(1);
     const P = PLAN_P1;
-    drawFitL(P.loc.x, P.loc.y, loc, 535-P.loc.x-10, 11);
+    drawFitL(P.valueX, P.loc.y, loc, 535-P.valueX-10, 11);
 
-    const maxWpx = (535-P.purposeLines[0].x-10)*scale;
+    const maxWpx = (535-P.valueX-10)*scale;
     ctx.font = `${10.5*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
     let lines = [];
     if(ctx.measureText(purpose).width <= maxWpx){ lines=[purpose]; }
@@ -765,45 +777,33 @@ async function buildPlanBytes(){
       if(line) lines.push(line);
       lines = lines.slice(0,2);
     }
-    drawL(P.purposeLines[0].x, P.purposeLines[0].y, lines[0]||'', 10.5);
-    if(lines[1]) drawL(P.purposeLines[1].x, P.purposeLines[1].y, lines[1], 10.5);
+    drawL(P.valueX, P.purposeLines[0].y, lines[0]||'', 10.5);
+    if(lines[1]) drawL(P.valueX, P.purposeLines[1].y, lines[1], 10.5);
 
-    drawL(P.period.x, P.period.y, `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, 11);
-    drawL(P.pressure.x, P.pressure.y, pressText, 11);
+    drawL(P.valueX, P.period.y, `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, 11);
+    drawL(P.valueX, P.pressure.y, pressText, 11);
 
-    const colX = P.colX, dataTop = P.dataTop, rowH = P.rowH;
-    const rowCenterY = k => { const top=dataTop-rowH*k, bottom=top-rowH; return (top+bottom)/2; };
-    const cellCx = (a,b) => (a+b)/2;
-    const drawCell = (a,b,y,txt,size)=>{
-      const cx = cellCx(a,b);
+    const drawCell = (cx,y,txt,size)=>{
       const p = toPx(cx,y);
       ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
       ctx.font = `${size*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
       ctx.fillText(txt, p.x, p.y);
     };
-    const drawPipeRow = (k, r) => {
-      const cy = rowCenterY(k) - 3;
+    const drawPipeRow = (y, r) => {
       const isMain = r.kind==='본관';
-      if(isMain){ drawCell(colX[2],colX[3],cy,r.dia||'',9.5); drawCell(colX[3],colX[4],cy,r.len?r.len+'M':'',9.5); }
-      else { drawCell(colX[4],colX[5],cy,r.dia||'',9.5); drawCell(colX[5],colX[6],cy,r.len?r.len+'M':'',9.5); }
-      drawCell(colX[6],colX[7],cy,r.dia||'',9.5); drawCell(colX[7],colX[8],cy,r.len?r.len+'M':'',9.5);
+      if(isMain){ drawCell(P.colCx[0],y,r.dia||'',9.5); drawCell(P.colCx[1],y,r.len?r.len+'M':'',9.5); }
+      else { drawCell(P.colCx[2],y,r.dia||'',9.5); drawCell(P.colCx[3],y,r.len?r.len+'M':'',9.5); }
+      drawCell(P.colCx[4],y,r.dia||'',9.5); drawCell(P.colCx[5],y,r.len?r.len+'M':'',9.5);
     };
     const repRows = pipeRows.filter(r=>r.scope==='신고대상' && r.len).slice(0,P.nReport);
     const nonRows = pipeRows.filter(r=>r.scope==='비신고대상' && r.len).slice(0,P.nNonreport);
-    repRows.forEach((r,i)=>drawPipeRow(i,r));
+    repRows.forEach((r,i)=>drawPipeRow(P.reportRowY[i], r));
     const repSum = pipeGroupSummary('신고대상');
     if(repSum){
-      const cy = rowCenterY(P.nReport)-3;
-      drawCell(colX[6],colX[7],cy,repSum.diaLabel,9.5);
-      drawCell(colX[7],colX[8],cy,repSum.total.toLocaleString()+'M',9.5);
+      drawCell(P.colCx[4], P.sumRowY, repSum.diaLabel, 9.5);
+      drawCell(P.colCx[5], P.sumRowY, repSum.total.toLocaleString()+'M', 9.5);
     }
-    nonRows.forEach((r,i)=>drawPipeRow(P.nReport+1+i,r));
-    const nonSum = pipeGroupSummary('비신고대상');
-    if(nonSum){
-      const cy = rowCenterY(P.nReport+1+P.nNonreport)-3;
-      drawCell(colX[6],colX[7],cy,nonSum.diaLabel,9.5);
-      drawCell(colX[7],colX[8],cy,nonSum.total.toLocaleString()+'M',9.5);
-    }
+    nonRows.forEach((r,i)=>drawPipeRow(P.nonreportRowY, r));
 
     drawL(P.cost1.x, P.cost1.y, fmtWon($('costTotal').value), 10.5);
     drawL(P.cost2.x, P.cost2.y, fmtWon($('costUser').value), 10.5);
@@ -814,28 +814,24 @@ async function buildPlanBytes(){
 
   // ---- PAGE 2 : 공사공정표 ----
   {
-    const {canvas, ctx, toPx, drawL} = await renderBaseCanvas(2);
+    const {canvas, ctx, toPx} = await renderBaseCanvas(2);
     const P = PLAN_P2;
-    drawL(P.period.x, P.period.y, `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, 10.5);
-    ganttSegments.forEach((seg,si)=>{
-      const cx = (P.gx[1+si]+P.gx[2+si])/2;
-      const p = toPx(cx, P.gTop-P.headH/2-3);
+    {
+      const p = toPx(P.dateCx, P.dateY);
       ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
-      ctx.font = `${9.5*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      ctx.fillText(seg?`${seg.from}~${seg.to}일차`:'-', p.x, p.y);
-    });
+      ctx.font = `${10*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
+      ctx.fillText(`${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, p.x, p.y);
+    }
     const idxList = activeGanttIdx();
-    idxList.forEach(ti=>{
-      const rowTop = P.gTop - P.headH - P.rowH2*ti, rowBottom = rowTop - P.rowH2;
-      const cyPt = (rowTop+rowBottom)/2;
+    idxList.forEach(catIdx=>{
+      const rowY = P.catY[catIdx];
       ganttSegments.forEach((seg,si)=>{
         if(!seg) return;
-        const key = ti+'_'+si;
+        const key = catIdx+'_'+si;
         if(ganttOff.has(key)) return;
-        const cx = (P.gx[1+si]+P.gx[2+si])/2;
-        const p = toPx(cx, cyPt);
+        const p = toPx(P.segCx[si], rowY);
         ctx.fillStyle = '#c15f3c';
-        ctx.fillRect(p.x - 16*scale, p.y - 5*scale, 32*scale, 10*scale);
+        ctx.fillRect(p.x - 30*scale, p.y - 15*scale, 60*scale, 30*scale);
       });
     });
     canvases.push(canvas);
@@ -846,25 +842,18 @@ async function buildPlanBytes(){
     const {canvas, ctx, toPx, drawL} = await renderBaseCanvas(3);
     const P = PLAN_P3;
     const proj = $('fProjectName').value.trim();
-    drawL(P.name.x, P.name.y, proj, 10.5);
+    drawL(P.valueX, P.nameY, proj, 10.5);
     const c = currentContractor || {};
     const vals = [c.name, c.rep, c.addr, c.license, c.mgrName, c.mgrBirth, c.mgrAddr, c.mgrQual];
-    vals.forEach((v,i)=> drawL(P.fieldX, P.fieldYs[i], v||'', 10.5));
+    vals.forEach((v,i)=> drawL(P.valueX, P.fieldYs[i], v||'', 10.5));
     const monthVal = $('fMonth').value;
     if(monthVal){
       const [yy,mm] = monthVal.split('-');
-      const p = toPx(P.dateCx, P.dateY);
-      ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
+      ctx.textAlign='right'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
       ctx.font = `${10.5*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      ctx.fillText(`${yy} 년  ${mm} 월     일`, p.x, p.y);
-    }
-    drawL(P.submit.x, P.submit.y, COMPANY_FIXED.addr, 10.5);
-    {
-      const p1 = toPx(P.dateCx, P.companyY);
-      ctx.textAlign='center'; ctx.font = `${10.5*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      ctx.fillText(COMPANY_FIXED.name, p1.x, p1.y);
-      const p2 = toPx(P.dateCx, P.repY);
-      ctx.fillText(`대표이사 ${COMPANY_FIXED.rep} (인)`, p2.x, p2.y);
+      const pyy = toPx(P.yyX, P.dateY), pmm = toPx(P.mmX, P.dateY);
+      ctx.fillText(yy, pyy.x, pyy.y);
+      ctx.fillText(mm, pmm.x, pmm.y);
     }
     canvases.push(canvas);
   }

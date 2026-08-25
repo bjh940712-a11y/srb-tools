@@ -185,11 +185,11 @@
       <span class="badge pending" id="appStatus">미생성</span>
     </div>
     <div class="row">
-      <button class="btn primary" id="btnGenPlan">② 공사계획서 PDF 생성 (공사계획서+공정표+시공자선정신고서)</button>
-      <span class="badge pending" id="planStatus">미생성</span>
+      <button class="btn" id="btnGenPlanDocx">② 공사계획서 워드(.docx) 다운로드 (원본 서식 그대로, 직접 수정 가능)</button>
     </div>
     <div class="row">
-      <button class="btn" id="btnGenPlanDocx">② 공사계획서 워드(.docx) 다운로드 (원본 서식 그대로, 직접 수정 가능)</button>
+      <button class="btn primary" id="btnGenPlan">② 공사계획서 PDF 생성 (워드와 동일한 서식·공정표, 공사계획서+공정표+시공자선정신고서)</button>
+      <span class="badge pending" id="planStatus">미생성</span>
     </div>
     <div class="log" id="genLog"></div>
   </div>
@@ -728,6 +728,10 @@ const PLAN_FONT_FILE = 'NotoSansKR-Subset.otf';
 const PLAN_P2 = {
   dateCx:342, dateY:547,
   segCx:[176, 244, 311, 378, 449],
+  // 각 구간(1~6일차 등)의 실제 좌/우 경계(중심점들의 중점으로 계산). 워드 버전과 동일하게
+  // 연속된 구간은 경계가 맞닿아 끊김 없이 하나의 얇은 막대로 이어지도록 그린다.
+  segBounds:[142, 210, 277.5, 344.5, 413.5, 484.5],
+  barHeight:6, // 원본 서식의 얇은 안내선과 같은 두께
   // 6개 공정 카테고리(배관공사/터파기및되메우기/비파괴검사/전기방식공사/자체검사뒷정리/시공감리)의 행 중심 y
   catY:[482.6, 432.8, 384.3, 335.9, 287.6, 239.1]
 };
@@ -856,6 +860,8 @@ async function buildPlanBytes(){
     const tw = korFont.widthOfTextAtSize(periodText, 10);
     page.drawText(periodText, {x:P.dateCx-tw/2, y:P.dateY, size:10, font:korFont, color:rgb(0,0,0)});
 
+    // 워드 버전(공사공정표 표의 얇은 가운데 행)과 동일한 모양: 선택된 구간을 얇은 막대로
+    // 표시하고, 연속된 구간은 경계가 맞닿아 하나로 이어지도록 그린다.
     const idxList = activeGanttIdx();
     idxList.forEach(catIdx=>{
       const rowY = P.catY[catIdx];
@@ -863,8 +869,9 @@ async function buildPlanBytes(){
         if(!seg) return;
         const key = catIdx+'_'+si;
         if(ganttOff.has(key)) return;
+        const x0 = P.segBounds[si], x1 = P.segBounds[si+1];
         page.drawRectangle({
-          x: P.segCx[si]-30, y: rowY-15, width:60, height:30,
+          x: x0, y: rowY - P.barHeight/2, width: x1-x0, height: P.barHeight,
           color: rgb(0.757,0.373,0.235)
         });
       });
@@ -972,6 +979,10 @@ $('btnGenPlanDocx').addEventListener('click', async ()=>{
     a.href = url; a.download = `2.공사계획서(${$('fProjectName').value.trim()||'공사'}).docx`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    // 병합(6종 서류 병합) 단계에서 쓸 기본 PDF도 같이 준비해 둔다(워드와 동일한 서식/여백/공정표
+    // 막대 모양의 PDF). 워드만 내려받고 PDF 버튼은 안 눌러도 병합이 항상 최신본을 쓰도록 함.
+    planFormBytes = await buildPlanBytes();
+    $('planStatus').textContent='생성 완료'; $('planStatus').className='badge';
   }catch(e){ logTo('genLog','워드 생성 실패: '+e.message,'err'); }
 });
 

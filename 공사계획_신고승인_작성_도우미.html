@@ -156,6 +156,7 @@
       <label class="lbl">시공업체 선택</label>
       <select id="ctSelect" style="max-width:280px;"><option value="">(불러오는 중...)</option></select>
       <button class="btn secondary small" id="btnReloadCt">새로고침</button>
+      <button class="btn secondary small" id="btnEditCt">선택한 업체 수정</button>
       <button class="btn secondary small" id="btnNewCt">+ 새 업체 등록</button>
     </div>
     <div class="contractorbox" id="ctPreview" style="display:none;"></div>
@@ -443,8 +444,8 @@ $('btnNewCt').addEventListener('click',()=>{
   $('ctFileCertName').textContent='파일 없음';
   $('ctEditPanel').dataset.editId = '';
 });
-$('ctSelect').addEventListener('dblclick',()=>{
-  if(!currentContractor) return;
+function openCtEditForSelected(){
+  if(!currentContractor){ toast('먼저 위 목록에서 수정할 업체를 선택하세요'); return; }
   const c = currentContractor;
   $('ctEditPanel').style.display='block';
   $('ctName').value=c.name||''; $('ctRep').value=c.rep||''; $('ctAddr').value=c.addr||'';
@@ -454,7 +455,10 @@ $('ctSelect').addEventListener('dblclick',()=>{
   $('ctFileLicenseName').textContent = c.licenseImg?'저장된 파일 있음(그대로 유지됨)':'파일 없음';
   $('ctFileCertName').textContent = c.certImg?'저장된 파일 있음(그대로 유지됨)':'파일 없음';
   $('ctEditPanel').dataset.editId = c.id;
-});
+  $('ctEditPanel').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+$('btnEditCt').addEventListener('click', openCtEditForSelected);
+$('ctSelect').addEventListener('dblclick', openCtEditForSelected);
 $('btnCancelCt').addEventListener('click',()=>{ $('ctEditPanel').style.display='none'; });
 
 async function fileToCompressedDataURL(file, maxDim, quality){

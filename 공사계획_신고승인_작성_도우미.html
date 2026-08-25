@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="fontkit.umd.min.js"></script>
+<script src="pizzip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore-compat.js"></script>
@@ -186,6 +187,9 @@
     <div class="row">
       <button class="btn primary" id="btnGenPlan">② 공사계획서 PDF 생성 (공사계획서+공정표+시공자선정신고서)</button>
       <span class="badge pending" id="planStatus">미생성</span>
+    </div>
+    <div class="row">
+      <button class="btn" id="btnGenPlanDocx">② 공사계획서 워드(.docx) 다운로드 (원본 서식 그대로, 직접 수정 가능)</button>
     </div>
     <div class="log" id="genLog"></div>
   </div>
@@ -840,6 +844,107 @@ async function buildPlanBytes(){
 
   return pdfDoc.save();
 }
+
+/* ---- 공사계획서 워드(.docx) 다운로드 : PDF 폼필드 대신 원본 .doc를 그대로 워드 문서로
+   내보내고, §TOKEN§ 형태로 심어둔 자리표시자를 브라우저에서 직접 문자열 치환한다.
+   서버 없이 PizZip으로 .docx(zip) 안의 word/document.xml만 바꿔 다시 압축한다. ---- */
+const PLAN_DOCX_FILE = 'template_plan.docx';
+function xmlEscape(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+function gatherPlanTokenValues(){
+  const loc = $('pLoc').value.trim();
+  const purpose = $('pPurpose').value.trim();
+  const start = $('pStart').value, end = $('pEnd').value;
+  if(!loc) throw new Error('공사 위치를 입력하세요');
+  if(!purpose) throw new Error('공사 목적을 입력하세요');
+  if(!start || !end) throw new Error('공사 기간을 입력하세요');
+  const isMid = document.querySelector('input[name=pressKind]:checked').value === 'mid';
+  const pressText = isMid ? '중압관 979 KPa' : '저압관 98.1 KPa';
+  const periodText = `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`;
+
+  const vals = { LOC: loc, PURPOSE: purpose, PERIOD: periodText, PERIOD2: periodText, PRESSURE: pressText };
+
+  const repRows = pipeRows.filter(r=>r.scope==='신고대상' && r.len).slice(0,4);
+  const nonRows = pipeRows.filter(r=>r.scope==='비신고대상' && r.len).slice(0,1);
+  for(let n=1;n<=4;n++){
+    vals[`R${n}_MDIA`]=''; vals[`R${n}_MLEN`]=''; vals[`R${n}_SDIA`]=''; vals[`R${n}_SLEN`]=''; vals[`R${n}_TDIA`]=''; vals[`R${n}_TLEN`]='';
+  }
+  repRows.forEach((r,i)=>{
+    const n=i+1, isMain = r.kind==='본관';
+    vals[`R${n}_MDIA`] = isMain ? (r.dia||'') : '';
+    vals[`R${n}_MLEN`] = isMain ? (r.len?r.len+'M':'') : '';
+    vals[`R${n}_SDIA`] = isMain ? '' : (r.dia||'');
+    vals[`R${n}_SLEN`] = isMain ? '' : (r.len?r.len+'M':'');
+    vals[`R${n}_TDIA`] = r.dia||'';
+    vals[`R${n}_TLEN`] = r.len?r.len+'M':'';
+  });
+  const repSum = pipeGroupSummary('신고대상');
+  vals.SUM_TDIA = repSum ? repSum.diaLabel : '';
+  vals.SUM_TLEN = repSum ? (repSum.total.toLocaleString()+'M') : '';
+  vals.N1_MDIA=''; vals.N1_MLEN=''; vals.N1_SDIA=''; vals.N1_SLEN=''; vals.N1_TDIA=''; vals.N1_TLEN='';
+  nonRows.forEach(r=>{
+    const isMain = r.kind==='본관';
+    vals.N1_MDIA = isMain ? (r.dia||'') : '';
+    vals.N1_MLEN = isMain ? (r.len?r.len+'M':'') : '';
+    vals.N1_SDIA = isMain ? '' : (r.dia||'');
+    vals.N1_SLEN = isMain ? '' : (r.len?r.len+'M':'');
+    vals.N1_TDIA = r.dia||'';
+    vals.N1_TLEN = r.len?r.len+'M':'';
+  });
+
+  vals.COST1 = fmtWon($('costTotal').value);
+  vals.COST2 = fmtWon($('costUser').value);
+  vals.COST3 = fmtWon($('costCompany').value);
+
+  vals.PROJNAME = $('fProjectName').value.trim();
+  const c = currentContractor || {};
+  vals.C_NAME = c.name||''; vals.C_REP = c.rep||''; vals.C_ADDR = c.addr||'';
+  vals.C_LICENSE = c.license||''; vals.C_MGRNAME = c.mgrName||''; vals.C_MGRBIRTH = c.mgrBirth||'';
+  vals.C_MGRADDR = c.mgrAddr||''; vals.C_MGRQUAL = c.mgrQual||'';
+
+  const monthVal = $('fMonth').value;
+  if(monthVal){ const [yy,mm]=monthVal.split('-'); vals.YY=yy; vals.MM=mm; } else { vals.YY=''; vals.MM=''; }
+
+  // 공정표(2페이지): 카테고리(0~5) x 그룹(0~4) 활성 여부 -> 실제 표 칸 배경색 토큰
+  const idxList = activeGanttIdx();
+  for(let cat=0; cat<6; cat++){
+    for(let g=0; g<5; g++){
+      const active = idxList.includes(cat) && !!ganttSegments[g] && !ganttOff.has(cat+'_'+g);
+      vals[`G${cat}_${g}`] = active ? 'C15F3C' : 'FFFFFF';
+    }
+  }
+  return vals;
+}
+async function buildPlanDocxBytes(){
+  const vals = gatherPlanTokenValues();
+  const buf = await fetchTemplateBytes(PLAN_DOCX_FILE);
+  const zip = new PizZip(buf);
+  let xml = zip.file('word/document.xml').asText();
+  Object.keys(vals).forEach(key=>{
+    const token = '§'+key+'§';
+    const isColor = /^G\d_\d$/.test(key);
+    const repl = isColor ? vals[key] : xmlEscape(vals[key]);
+    xml = xml.split(token).join(repl);
+  });
+  zip.file('word/document.xml', xml);
+  return zip.generate({type:'arraybuffer', compression:'DEFLATE'});
+}
+$('btnGenPlanDocx').addEventListener('click', async ()=>{
+  try{
+    logTo('genLog','공사계획서 워드(.docx) 생성 중... (원본 서식 불러오는 중)');
+    const bytes = await buildPlanDocxBytes();
+    logTo('genLog','공사계획서 워드(.docx) 생성 완료 (원본 서식 그대로, 직접 열어 수정/PDF저장 가능)','ok');
+    const blob = new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `2.공사계획서(${$('fProjectName').value.trim()||'공사'}).docx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+  }catch(e){ logTo('genLog','워드 생성 실패: '+e.message,'err'); }
+});
 
 $('btnGenPlan').addEventListener('click', async ()=>{
   try{

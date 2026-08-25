@@ -713,6 +713,15 @@ function wrapPurposeText(font, text, size, maxW){
   return [lines[0]||'', lines[1]||''];
 }
 
+// 값이 길어도 필드 폭을 절대 벗어나지 않도록, 실측 필드 폭에 맞춰 폰트 크기를 자동으로 줄인다.
+// (PDF 입력필드는 내용이 넓으면 상자 밖으로 삐져나올 수 있어, 항상 실제 폭 기준으로 맞춰 그린다.)
+function fitFieldFontSize(font, text, maxSize, maxWidthPt, minSize){
+  minSize = minSize || 6;
+  let size = maxSize;
+  while(size > minSize && font.widthOfTextAtSize(text, size) > maxWidthPt) size -= 0.25;
+  return size;
+}
+
 async function buildPlanBytes(){
   const loc = $('pLoc').value.trim();
   const purpose = $('pPurpose').value.trim();
@@ -734,15 +743,21 @@ async function buildPlanBytes(){
   const korFont = await pdfDoc.embedFont(fontBytes, {subset:true});
 
   const form = pdfDoc.getForm();
-  const set = (name, val, size)=>{
+  // maxSize: 기본(원하는) 폰트 크기. 실제 필드 폭보다 텍스트가 길면 자동으로 축소해서
+  // 절대 상자 밖으로 삐져나오지 않도록 한다.
+  const set = (name, val, maxSize)=>{
     const f = form.getTextField(name);
-    f.setText(val==null ? '' : String(val));
-    f.setFontSize(size);
+    const text = val==null ? '' : String(val);
+    const rect = f.acroField.getWidgets()[0].getRectangle();
+    const fitSize = fitFieldFontSize(korFont, text, maxSize, rect.width - 6);
+    f.setText(text);
+    f.setFontSize(fitSize);
   };
 
   // ---- PAGE 1 : 공사계획서 ----
   set('loc', loc, 11);
-  const [pLine1, pLine2] = wrapPurposeText(korFont, purpose, 10.5, 447-88-10);
+  const purposeRect = form.getTextField('purpose1').acroField.getWidgets()[0].getRectangle();
+  const [pLine1, pLine2] = wrapPurposeText(korFont, purpose, 10.5, purposeRect.width - 6);
   set('purpose1', pLine1, 10.5);
   set('purpose2', pLine2, 10.5);
   set('period', `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, 11);

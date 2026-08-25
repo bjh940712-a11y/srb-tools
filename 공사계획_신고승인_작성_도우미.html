@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-<script src="fontkit.umd.min.js"></script>
 <script src="pizzip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
@@ -719,47 +718,211 @@ $('btnGenApp').addEventListener('click', async ()=>{
 });
 
 /* ================= 7. 공사계획서 + 공정표 + 시공자선정신고서 =================
-   실제로 사용하시던 2.공사계획서.doc 원본을 그대로 PDF화하고, 작성해야 하는 곳에는
-   실제 PDF 입력필드(AcroForm)를 심어둔 template_plan.pdf(3페이지)를 사용한다.
-   좌표를 캔버스에 "그려 넣는" 방식이 아니라, 필드에 값을 "타이핑"해 채운 뒤 flatten한다.
-   (페이지2 공정표의 주황색 표시만 도형이라 pdf-lib로 직접 그린다.) */
-const PLAN_TEMPLATE_FILE = 'template_plan.pdf';
-const PLAN_FONT_FILE = 'NotoSansKR-Subset.otf';
-const PLAN_P2 = {
-  dateCx:342, dateY:547,
-  segCx:[176, 244, 311, 378, 449],
-  // 각 구간(1~6일차 등)의 실제 좌/우 경계(중심점들의 중점으로 계산). 워드 버전과 동일하게
-  // 연속된 구간은 경계가 맞닿아 끊김 없이 하나의 얇은 막대로 이어지도록 그린다.
-  segBounds:[142, 210, 277.5, 344.5, 413.5, 484.5],
-  barHeight:6, // 원본 서식의 얇은 안내선과 같은 두께
-  // 6개 공정 카테고리(배관공사/터파기및되메우기/비파괴검사/전기방식공사/자체검사뒷정리/시공감리)의 행 중심 y
-  catY:[482.6, 432.8, 384.3, 335.9, 287.6, 239.1]
-};
+   PDF 템플릿 위에 좌표로 덧씌우는 방식을 완전히 버리고, 준공조서/시공일지 도우미와
+   같은 방식(자체 HTML 양식을 만들어 html2canvas + jsPDF로 PDF화)으로 3페이지를 직접
+   그린다. 워드(.docx) 다운로드 기능과 동일한 레이아웃/내용을 유지한다. */
 function fmtDatePeriod(v){ if(!v) return ''; const p=v.split('-'); return `${p[0]}.${p[1]}.${p[2]}`; }
 
-// 필드 폭 안에 들어가도록 텍스트를 최대 2줄로 나눈다(목적란 전용).
-function wrapPurposeText(font, text, size, maxW){
-  if(font.widthOfTextAtSize(text, size) <= maxW) return [text, ''];
-  let line='', lines=[];
-  for(const ch of text){
-    const test = line+ch;
-    if(font.widthOfTextAtSize(test, size) > maxW){ if(line) lines.push(line); line=ch; }
-    else line = test;
+// A4 한 페이지 크기(px). addCanvasAsPages()가 24pt 여백으로 폭을 맞추므로
+// (595.28-48)pt 폭 기준으로 A4 비율을 유지하면 정확히 1페이지에 들어간다.
+const PLAN_PAGE_W = 794, PLAN_PAGE_H = 1123;
+
+function planPageDiv(){
+  const d = document.createElement('div');
+  d.style.cssText = `width:${PLAN_PAGE_W}px;height:${PLAN_PAGE_H}px;box-sizing:border-box;`+
+    `padding:60px 55px;background:#fff;color:#000;`+
+    `font-family:'Batang','바탕','Malgun Gothic','맑은 고딕',serif;overflow:hidden;position:relative;`;
+  return d;
+}
+function planTitleHTML(title){
+  return `<div style="text-align:center;margin-bottom:8px;">
+    <div style="font-size:32px;font-weight:bold;letter-spacing:10px;">${esc(title)}</div>
+    <div style="font-size:22px;font-weight:bold;letter-spacing:2px;line-height:0.6;">---------------</div>
+  </div>`;
+}
+
+function buildPlanPage1(data){
+  const d = planPageDiv();
+  const secLabel = 'font-size:18px;font-weight:bold;letter-spacing:4px;margin:26px 0 10px 24px;';
+  const secBody  = 'font-size:16px;margin-left:52px;line-height:1.5;';
+  const th = 'border:1px solid #000;padding:7px 4px;font-size:15px;text-align:center;font-weight:normal;letter-spacing:2px;';
+  const tdv = 'border:1px solid #000;padding:7px 4px;font-size:14.5px;text-align:center;height:22px;';
+
+  const rows = data.repRows, non = data.nonRow;
+  const rcell = (r, colKind) => {
+    if(!r) return ['','',''];
+    const isMain = r.kind==='본관';
+    if(colKind==='m') return isMain ? [fmtDia(r.dia), r.len?r.len+'M':''] : ['',''];
+    if(colKind==='s') return isMain ? ['',''] : [fmtDia(r.dia), r.len?r.len+'M':''];
+    return [fmtDia(r.dia), r.len?r.len+'M':''];
+  };
+  let bodyRows = '';
+  for(let i=0;i<4;i++){
+    const r = rows[i];
+    const m = rcell(r,'m'), s = rcell(r,'s'), t = rcell(r,'t');
+    bodyRows += `<tr>
+      ${i===0?`<td style="${tdv}width:5%;" rowspan="6">규<br>모</td><td style="${tdv}width:11%;" rowspan="4">신고<br>대상</td>`:''}
+      <td style="${tdv}">${esc(m[0])}</td><td style="${tdv}">${esc(m[1])}</td>
+      <td style="${tdv}">${esc(s[0])}</td><td style="${tdv}">${esc(s[1])}</td>
+      <td style="${tdv}">${esc(t[0])}</td><td style="${tdv}">${esc(t[1])}</td>
+    </tr>`;
   }
-  if(line) lines.push(line);
-  return [lines[0]||'', lines[1]||''];
+  const sum = data.repSum;
+  bodyRows += `<tr>
+    <td style="${tdv}font-weight:bold;">계</td>
+    <td style="${tdv}"></td><td style="${tdv}"></td><td style="${tdv}"></td><td style="${tdv}"></td>
+    <td style="${tdv}">${esc(sum?sum.diaLabel:'')}</td><td style="${tdv}">${esc(sum?sum.total.toLocaleString()+'M':'')}</td>
+  </tr>`;
+  const nm = rcell(non,'m'), ns = rcell(non,'s'), nt = rcell(non,'t');
+  bodyRows += `<tr>
+    <td style="${tdv}">비신고<br>대상</td>
+    <td style="${tdv}">${esc(nm[0])}</td><td style="${tdv}">${esc(nm[1])}</td>
+    <td style="${tdv}">${esc(ns[0])}</td><td style="${tdv}">${esc(ns[1])}</td>
+    <td style="${tdv}">${esc(nt[0])}</td><td style="${tdv}">${esc(nt[1])}</td>
+  </tr>`;
+
+  d.innerHTML = `
+    ${planTitleHTML('공 사 계 획 서')}
+    <div style="${secLabel}margin-top:34px;">1. 공 사 위 치</div>
+    <div style="${secBody}">${esc(data.loc)}</div>
+    <div style="${secLabel}">2. 공 사 목 적</div>
+    <div style="${secBody}">${esc(data.purpose)}</div>
+    <div style="${secLabel}">3. 공 사 기 간</div>
+    <div style="${secBody}">${esc(data.periodText)}</div>
+    <div style="${secLabel}">4. 최 고 사 용 압 력</div>
+    <div style="${secBody}">${esc(data.pressText)}</div>
+    <div style="${secLabel}">5. 배 관 내 역</div>
+    <table style="width:100%;border-collapse:collapse;margin-top:4px;">
+      <tr>
+        <td style="${th}width:16%;" colspan="2" rowspan="2">구&nbsp;&nbsp;&nbsp;분</td>
+        <td style="${th}" colspan="2">본&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;관</td>
+        <td style="${th}" colspan="2">공&nbsp;&nbsp;급&nbsp;&nbsp;관</td>
+        <td style="${th}" colspan="2">계 (M)</td>
+      </tr>
+      <tr>
+        <td style="${th}width:14%;">관 경</td><td style="${th}width:14%;">길 이</td>
+        <td style="${th}width:14%;">관 경</td><td style="${th}width:14%;">길 이</td>
+        <td style="${th}width:14%;">관 경</td><td style="${th}width:14%;">길 이</td>
+      </tr>
+      ${bodyRows}
+    </table>
+    <div style="${secLabel}">6. 공 사 비 내 역</div>
+    <div style="${secBody}margin-left:60px;line-height:2.0;">
+      <div>총예상 공급관 공사비&nbsp;&nbsp;:&nbsp;&nbsp;${esc(data.cost1)}</div>
+      <div>수요가부담 시설분담금 外&nbsp;:&nbsp;&nbsp;${esc(data.cost2)}</div>
+      <div>도시가스회사 부담금&nbsp;&nbsp;&nbsp;:&nbsp;&nbsp;&nbsp;${esc(data.cost3)}</div>
+    </div>`;
+  return d;
 }
 
-// 값이 길어도 필드 폭을 절대 벗어나지 않도록, 실측 필드 폭에 맞춰 폰트 크기를 자동으로 줄인다.
-// (PDF 입력필드는 내용이 넓으면 상자 밖으로 삐져나올 수 있어, 항상 실제 폭 기준으로 맞춰 그린다.)
-function fitFieldFontSize(font, text, maxSize, maxWidthPt, minSize){
-  minSize = minSize || 6;
-  let size = maxSize;
-  while(size > minSize && font.widthOfTextAtSize(text, size) > maxWidthPt) size -= 0.25;
-  return size;
+function buildPlanPage2(data){
+  const d = planPageDiv();
+  const groups = ['1~6일차','7~12일차','13~18일차','19~24일차','25~29일차'];
+  const cats = ['배 관 공 사','터 파 기 및<br>되 메 우 기','비파괴 검사','전기방식공사','자 체 검 사<br>뒷 정 리','시 공 감 리'];
+  const activeIdx = data.activeIdx;
+  const border = 'border:1px solid #000;';
+
+  let headGroups = '';
+  groups.forEach(g=>{ headGroups += `<td style="${border}padding:10px 2px;font-size:15px;text-align:center;">${esc(g)}</td>`; });
+  headGroups += `<td style="${border}width:6%;"></td>`;
+
+  let bodyRows = '';
+  cats.forEach((cat,ci)=>{
+    let cells = '';
+    for(let g=0; g<5; g++){
+      const active = activeIdx.includes(ci) && !!data.ganttSegments[g] && !data.ganttOff.has(ci+'_'+g);
+      // 각 구간은 원본 양식처럼 얇은 세로 안내선 4칸으로 나뉘고,
+      // 선택된 구간은 세로 중앙에 얇은 주황 막대(양 옆 칸과 이어짐)를 그린다.
+      cells += `<td style="${border}padding:0;position:relative;height:86px;">
+        <div style="position:absolute;inset:0;display:flex;">
+          <div style="flex:1;border-right:1px solid #aaa;"></div>
+          <div style="flex:1;border-right:1px solid #aaa;"></div>
+          <div style="flex:1;border-right:1px solid #aaa;"></div>
+          <div style="flex:1;"></div>
+        </div>
+        ${active?`<div style="position:absolute;left:0;right:0;top:50%;height:9px;margin-top:-4.5px;background:#c15f3c;"></div>`:''}
+      </td>`;
+    }
+    cells += `<td style="${border}"></td>`;
+    bodyRows += `<tr>
+      <td style="${border}padding:8px 4px;font-size:15px;text-align:center;line-height:1.7;">${cat}</td>
+      ${cells}
+    </tr>`;
+  });
+
+  d.innerHTML = `
+    <div style="height:130px;"></div>
+    ${planTitleHTML('공 사 공 정 표')}
+    <div style="height:40px;"></div>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <colgroup>
+        <col style="width:17%;"><col style="width:15.4%;"><col style="width:15.4%;">
+        <col style="width:15.4%;"><col style="width:15.4%;"><col style="width:15.4%;"><col style="width:6%;">
+      </colgroup>
+      <tr>
+        <td style="${border}padding:6px;font-size:15px;text-align:center;line-height:2.2;" rowspan="2">공 사 기 간<br><br>공 사 종 류</td>
+        <td style="${border}padding:8px 2px;font-size:15px;text-align:center;" colspan="6">착공일로부터<br>${esc(data.periodText)}</td>
+      </tr>
+      <tr>${headGroups}</tr>
+      ${bodyRows}
+    </table>`;
+  return d;
 }
 
-async function buildPlanBytes(){
+function buildPlanPage3(data){
+  const d = planPageDiv();
+  const border = 'border:1px solid #000;';
+  const lbl = `${border}padding:12px 4px;font-size:15px;text-align:center;letter-spacing:3px;`;
+  const val = `${border}padding:12px 10px;font-size:14.5px;text-align:left;`;
+  const c = data.contractor;
+
+  d.innerHTML = `
+    <div style="height:30px;"></div>
+    <div style="text-align:center;font-size:27px;font-weight:bold;letter-spacing:4px;margin-bottom:24px;">시공자 및 시공관리자 선정 신고서</div>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+      <colgroup><col style="width:9%;"><col style="width:24%;"><col style="width:67%;"></colgroup>
+      <tr>
+        <td style="${lbl}" colspan="2">공&nbsp;&nbsp;&nbsp;사&nbsp;&nbsp;&nbsp;명</td>
+        <td style="${val}">${esc(data.projName)}</td>
+      </tr>
+      <tr>
+        <td style="${lbl}padding:4px;" rowspan="4">시<br><br>공<br><br>자</td>
+        <td style="${lbl}">상&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;호</td>
+        <td style="${val}">${esc(c.name||'')}</td>
+      </tr>
+      <tr><td style="${lbl}">대&nbsp;&nbsp;표&nbsp;&nbsp;자</td><td style="${val}">${esc(c.rep||'')}</td></tr>
+      <tr><td style="${lbl}">사무소 소재지</td><td style="${val}">${esc(c.addr||'')}</td></tr>
+      <tr><td style="${lbl}">면 허 구 분</td><td style="${val}">${esc(c.license||'')}</td></tr>
+      <tr>
+        <td style="${lbl}padding:4px;" rowspan="4">시<br>공<br>관<br>리<br>자</td>
+        <td style="${lbl}">성&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;명</td>
+        <td style="${val}">${esc(c.mgrName||'')}</td>
+      </tr>
+      <tr><td style="${lbl}">생 년 월 일</td><td style="${val}">${esc(c.mgrBirth||'')}</td></tr>
+      <tr><td style="${lbl}">주&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;소</td><td style="${val}">${esc(c.mgrAddr||'')}</td></tr>
+      <tr><td style="${lbl}">자 격 구 분</td><td style="${val}">${esc(c.mgrQual||'')}</td></tr>
+      <tr>
+        <td style="${border}padding:24px 28px;font-size:15px;" colspan="3">
+          <div style="line-height:2.2;">도시가스사업법 시행규칙 제18조의2 규정에 의거 상기와 같이 가스시설시공업자<br>및 시공관리자를 선정하였기에 신고합니다.</div>
+          <div style="text-align:center;margin-top:46px;font-size:15px;">${esc(data.yy)} 년&nbsp;&nbsp;${esc(data.mm)} 월&nbsp;&nbsp;&nbsp;&nbsp;일</div>
+          <div style="margin-top:40px;text-align:center;">신 청 인 : 경북 경주시 유림로5번길 183(용강동)</div>
+          <div style="margin-top:24px;text-align:center;letter-spacing:3px;">서 라 벌 도 시 가 스 (주)</div>
+          <div style="margin-top:24px;text-align:center;">대표이사 김&nbsp;&nbsp;준&nbsp;&nbsp;석&nbsp;&nbsp;(인)</div>
+          <div style="margin-top:40px;font-size:16px;letter-spacing:4px;">영 천 시 장 귀하</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="${border}padding:16px 28px;font-size:14px;line-height:1.9;" colspan="3">
+          첨&nbsp;&nbsp;&nbsp;부<br>
+          1. 가스시설 시공업&nbsp;&nbsp;등록필증 사본<br>
+          2. 자격증 사본 (원본대조필)
+        </td>
+      </tr>
+    </table>`;
+  return d;
+}
+
+function gatherPlanRenderData(){
   const loc = $('pLoc').value.trim();
   const purpose = $('pPurpose').value.trim();
   const start = $('pStart').value, end = $('pEnd').value;
@@ -767,118 +930,31 @@ async function buildPlanBytes(){
   if(!purpose) throw new Error('공사 목적을 입력하세요');
   if(!start || !end) throw new Error('공사 기간을 입력하세요');
   const isMid = document.querySelector('input[name=pressKind]:checked').value === 'mid';
-  const pressText = isMid ? '중압관 979 KPa' : '저압관 98.1 KPa';
-
-  const [tplBytes, fontBytes] = await Promise.all([
-    fetchTemplateBytes(PLAN_TEMPLATE_FILE),
-    fetchTemplateBytes(PLAN_FONT_FILE)
-  ]);
-
-  const { PDFDocument, rgb } = PDFLib;
-  const pdfDoc = await PDFDocument.load(tplBytes);
-  pdfDoc.registerFontkit(fontkit);
-  const korFont = await pdfDoc.embedFont(fontBytes, {subset:true});
-
-  const form = pdfDoc.getForm();
-  // maxSize: 기본(원하는) 폰트 크기. 실제 필드 폭보다 텍스트가 길면 자동으로 축소해서
-  // 절대 상자 밖으로 삐져나오지 않도록 한다.
-  const set = (name, val, maxSize)=>{
-    const f = form.getTextField(name);
-    const text = val==null ? '' : String(val);
-    const rect = f.acroField.getWidgets()[0].getRectangle();
-    const fitSize = fitFieldFontSize(korFont, text, maxSize, rect.width - 6);
-    f.setText(text);
-    f.setFontSize(fitSize);
-  };
-
-  // ---- PAGE 1 : 공사계획서 ----
-  set('loc', loc, 11);
-  const purposeRect = form.getTextField('purpose1').acroField.getWidgets()[0].getRectangle();
-  const [pLine1, pLine2] = wrapPurposeText(korFont, purpose, 10.5, purposeRect.width - 6);
-  set('purpose1', pLine1, 10.5);
-  set('purpose2', pLine2, 10.5);
-  set('period', `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, 11);
-  set('pressure', pressText, 11);
-
-  const repRows = pipeRows.filter(r=>r.scope==='신고대상' && r.len).slice(0,4);
-  const nonRows = pipeRows.filter(r=>r.scope==='비신고대상' && r.len).slice(0,1);
-  repRows.forEach((r,i)=>{
-    const n = i+1;
-    const isMain = r.kind==='본관';
-    set(`r${n}_mdia`, isMain ? fmtDia(r.dia) : '', 9.5);
-    set(`r${n}_mlen`, isMain ? (r.len?r.len+'M':'') : '', 9.5);
-    set(`r${n}_sdia`, isMain ? '' : fmtDia(r.dia), 9.5);
-    set(`r${n}_slen`, isMain ? '' : (r.len?r.len+'M':''), 9.5);
-    set(`r${n}_tdia`, fmtDia(r.dia), 9.5);
-    set(`r${n}_tlen`, r.len?r.len+'M':'', 9.5);
-  });
-  const repSum = pipeGroupSummary('신고대상');
-  if(repSum){
-    set('sum_tdia', repSum.diaLabel, 9.5);
-    set('sum_tlen', repSum.total.toLocaleString()+'M', 9.5);
-  }
-  nonRows.forEach(r=>{
-    const isMain = r.kind==='본관';
-    set('n1_mdia', isMain ? fmtDia(r.dia) : '', 9.5);
-    set('n1_mlen', isMain ? (r.len?r.len+'M':'') : '', 9.5);
-    set('n1_sdia', isMain ? '' : fmtDia(r.dia), 9.5);
-    set('n1_slen', isMain ? '' : (r.len?r.len+'M':''), 9.5);
-    set('n1_tdia', fmtDia(r.dia), 9.5);
-    set('n1_tlen', r.len?r.len+'M':'', 9.5);
-  });
-
-  set('cost1', fmtWon($('costTotal').value), 10.5);
-  set('cost2', fmtWon($('costUser').value), 10.5);
-  set('cost3', fmtWon($('costCompany').value), 10.5);
-
-  // ---- PAGE 3 : 시공자 및 시공관리자 선정 신고서 ----
-  set('projname', $('fProjectName').value.trim(), 10.5);
-  const c = currentContractor || {};
-  set('c_name', c.name||'', 10.5);
-  set('c_rep', c.rep||'', 10.5);
-  set('c_addr', c.addr||'', 10.5);
-  set('c_license', c.license||'', 10.5);
-  set('c_mgrname', c.mgrName||'', 10.5);
-  set('c_mgrbirth', c.mgrBirth||'', 10.5);
-  set('c_mgraddr', c.mgrAddr||'', 10.5);
-  set('c_mgrqual', c.mgrQual||'', 10.5);
   const monthVal = $('fMonth').value;
-  if(monthVal){
-    const [yy,mm] = monthVal.split('-');
-    const yyF = form.getTextField('yy'); yyF.setAlignment(2); set('yy', yy, 10.5);
-    const mmF = form.getTextField('mm'); mmF.setAlignment(2); set('mm', mm, 10.5);
-  }
+  let yy='', mm='';
+  if(monthVal){ [yy,mm] = monthVal.split('-'); }
+  return {
+    loc, purpose,
+    periodText: `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`,
+    pressText: isMid ? '중압관 979 KPa' : '저압관 98.1 KPa',
+    repRows: pipeRows.filter(r=>r.scope==='신고대상' && r.len).slice(0,4),
+    nonRow: pipeRows.filter(r=>r.scope==='비신고대상' && r.len)[0] || null,
+    repSum: pipeGroupSummary('신고대상'),
+    cost1: fmtWon($('costTotal').value),
+    cost2: fmtWon($('costUser').value),
+    cost3: fmtWon($('costCompany').value),
+    activeIdx: activeGanttIdx(),
+    ganttSegments, ganttOff,
+    projName: $('fProjectName').value.trim(),
+    contractor: currentContractor || {},
+    yy, mm
+  };
+}
 
-  form.updateFieldAppearances(korFont);
-  form.flatten();
-
-  // ---- PAGE 2 : 공사공정표 (도형/텍스트는 필드가 아니라 직접 그린다) ----
-  {
-    const page = pdfDoc.getPages()[1];
-    const P = PLAN_P2;
-    const periodText = `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`;
-    const tw = korFont.widthOfTextAtSize(periodText, 10);
-    page.drawText(periodText, {x:P.dateCx-tw/2, y:P.dateY, size:10, font:korFont, color:rgb(0,0,0)});
-
-    // 워드 버전(공사공정표 표의 얇은 가운데 행)과 동일한 모양: 선택된 구간을 얇은 막대로
-    // 표시하고, 연속된 구간은 경계가 맞닿아 하나로 이어지도록 그린다.
-    const idxList = activeGanttIdx();
-    idxList.forEach(catIdx=>{
-      const rowY = P.catY[catIdx];
-      ganttSegments.forEach((seg,si)=>{
-        if(!seg) return;
-        const key = catIdx+'_'+si;
-        if(ganttOff.has(key)) return;
-        const x0 = P.segBounds[si], x1 = P.segBounds[si+1];
-        page.drawRectangle({
-          x: x0, y: rowY - P.barHeight/2, width: x1-x0, height: P.barHeight,
-          color: rgb(0.757,0.373,0.235)
-        });
-      });
-    });
-  }
-
-  return pdfDoc.save();
+async function buildPlanBytes(){
+  const data = gatherPlanRenderData();
+  const pages = [buildPlanPage1(data), buildPlanPage2(data), buildPlanPage3(data)];
+  return nodeToPdfBytes(pages);
 }
 
 /* ---- 공사계획서 워드(.docx) 다운로드 : PDF 폼필드 대신 원본 .doc를 그대로 워드 문서로

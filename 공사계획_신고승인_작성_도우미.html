@@ -134,9 +134,9 @@
     <div class="hint" id="pipeSummary">신고대상 최대 4행, 비신고대상 최대 1행까지 서식에 들어갑니다(원본 서식 표 크기 그대로이며, 그 이상은 서식을 넓혀드릴 수 있으니 말씀해주세요).</div>
 
     <h2 style="margin-top:18px;"><span class="step">2-2</span> 공사비 내역</h2>
-    <div class="row"><label class="lbl">총예상 공급관 공사비</label><input type="number" id="costTotal" placeholder="원"></div>
-    <div class="row"><label class="lbl">수요가부담 시설분담금 外</label><input type="number" id="costUser" placeholder="원"></div>
-    <div class="row"><label class="lbl">도시가스회사 부담금</label><input type="number" id="costCompany" placeholder="원"></div>
+    <div class="row"><label class="lbl">총예상 공급관 공사비</label><input type="text" inputmode="numeric" id="costTotal" placeholder="원"></div>
+    <div class="row"><label class="lbl">수요가부담 시설분담금 外</label><input type="text" inputmode="numeric" id="costUser" placeholder="원"></div>
+    <div class="row"><label class="lbl">도시가스회사 부담금</label><input type="text" inputmode="numeric" id="costCompany" placeholder="원 (총예상 공급관 공사비 - 수요가부담 시설분담금, 자동계산 · 직접수정 가능)"></div>
 
     <h2 style="margin-top:18px;"><span class="step">2-3</span> 공사공정표</h2>
     <div class="hint">공사기간을 동일 일수로 5구간 나눠서 표시합니다. 저압관은 4개 공정(배관공사/터파기 및 되메우기/자체검사 뒷정리/시공감리), 중압관은 6개 공정(+비파괴검사/전기방식공사)이 표에 들어가며, 기본값은 전체 구간 선택입니다. 클릭해서 켜고 끌 수 있습니다.</div>
@@ -232,8 +232,15 @@ if(window.pdfjsLib){
 const $ = id => document.getElementById(id);
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 function logTo(id,msg,cls){ const d=document.createElement('div'); if(cls)d.className=cls; d.textContent=msg; $(id).appendChild(d); $(id).scrollTop=1e9; }
-function fmtWon(v){ v=Number(v||0); return v.toLocaleString()+'원'; }
+function fmtWon(v){ v=Number(String(v||0).replace(/,/g,'')); return v.toLocaleString()+'원'; }
 function pad2(n){ return String(n).padStart(2,'0'); }
+// 관경은 기본 단위가 A(예: 100A). 사용자가 숫자만 입력하면 자동으로 A를 붙이고,
+// 이미 단위(문자)를 직접 입력했으면 그대로 존중한다.
+function fmtDia(dia){
+  const v = String(dia||'').trim();
+  if(!v) return '';
+  return /^\d+(\.\d+)?$/.test(v) ? v+'A' : v;
+}
 // 신청서(별지13·14호)는 실제 제출본 PDF를 그대로 쓰므로 회사정보가 필요없지만, 공사계획서/
 // 시공자선정신고서 쪽 텍스트에는 계속 쓰인다. 회사가 바뀌지 않는 한 고정값으로 둔다.
 const COMPANY_FIXED = { name:'서라벌도시가스(주)', rep:'김준석', regNo:'171211-0024180', addr:'경상북도 경주시 유림로5번길 183(용강동)', tel:'(054)778-8114' };
@@ -253,7 +260,7 @@ function renderPipeTable(){
     tr.innerHTML = `
       <td><select data-f="scope"><option ${r.scope==='신고대상'?'selected':''}>신고대상</option><option ${r.scope==='비신고대상'?'selected':''}>비신고대상</option></select></td>
       <td><select data-f="kind"><option ${r.kind==='본관'?'selected':''}>본관</option><option ${r.kind==='공급관'?'selected':''}>공급관</option></select></td>
-      <td><input type="text" data-f="dia" value="${r.dia}" placeholder="예: 225A"></td>
+      <td><input type="text" data-f="dia" value="${r.dia}" placeholder="예: 225 (단위 A 자동입력)"></td>
       <td><input type="number" data-f="len" value="${r.len}" placeholder="M"></td>
       <td><button class="btn secondary small" data-a="del">삭제</button></td>`;
     tr.querySelectorAll('select,input').forEach(el=>{
@@ -269,7 +276,7 @@ function pipeGroupSummary(scope){
   const rows = pipeRows.filter(r=>r.scope===scope && r.len);
   if(!rows.length) return null;
   const total = rows.reduce((s,r)=>s+Number(r.len||0),0);
-  const dias = [...new Set(rows.map(r=>r.dia).filter(Boolean))];
+  const dias = [...new Set(rows.map(r=>fmtDia(r.dia)).filter(Boolean))];
   const diaLabel = dias.length ? (dias.length>1 ? dias[0]+' 외' : dias[0]) : '';
   return {diaLabel, total};
 }
@@ -285,6 +292,28 @@ function updatePipeSummary(){
 }
 $('btnAddPipeRow').addEventListener('click',()=>addPipeRow());
 addPipeRow({scope:'신고대상',kind:'공급관',dia:'',len:''});
+
+/* ---- 공사비 내역: 입력값에 천단위 콤마 표시 + 도시가스회사 부담금 자동계산 ----
+   (총예상 공급관 공사비 - 수요가부담 시설분담금 을 기본값으로 채우되, 사용자가 도시가스회사
+   부담금을 직접 입력하면 그 뒤로는 자동계산을 멈추고 입력값을 존중한다.) */
+function moneyNumber(v){ return Number(String(v||'').replace(/[^\d]/g,'')) || 0; }
+function bindMoneyInput(id){
+  $(id).addEventListener('input', ()=>{
+    const n = moneyNumber($(id).value);
+    $(id).value = n ? n.toLocaleString() : '';
+  });
+}
+['costTotal','costUser','costCompany'].forEach(bindMoneyInput);
+
+let costCompanyManual = false;
+$('costCompany').addEventListener('input', ()=>{ costCompanyManual = true; });
+function recalcCostCompany(){
+  if(costCompanyManual) return;
+  const diff = moneyNumber($('costTotal').value) - moneyNumber($('costUser').value);
+  $('costCompany').value = diff ? diff.toLocaleString() : '';
+}
+$('costTotal').addEventListener('input', recalcCostCompany);
+$('costUser').addEventListener('input', recalcCostCompany);
 
 /* ================= 2. 공사목적 자동생성 ================= */
 $('btnAutoPurpose').addEventListener('click',()=>{
@@ -772,11 +801,11 @@ async function buildPlanBytes(){
   repRows.forEach((r,i)=>{
     const n = i+1;
     const isMain = r.kind==='본관';
-    set(`r${n}_mdia`, isMain ? (r.dia||'') : '', 9.5);
+    set(`r${n}_mdia`, isMain ? fmtDia(r.dia) : '', 9.5);
     set(`r${n}_mlen`, isMain ? (r.len?r.len+'M':'') : '', 9.5);
-    set(`r${n}_sdia`, isMain ? '' : (r.dia||''), 9.5);
+    set(`r${n}_sdia`, isMain ? '' : fmtDia(r.dia), 9.5);
     set(`r${n}_slen`, isMain ? '' : (r.len?r.len+'M':''), 9.5);
-    set(`r${n}_tdia`, r.dia||'', 9.5);
+    set(`r${n}_tdia`, fmtDia(r.dia), 9.5);
     set(`r${n}_tlen`, r.len?r.len+'M':'', 9.5);
   });
   const repSum = pipeGroupSummary('신고대상');
@@ -786,11 +815,11 @@ async function buildPlanBytes(){
   }
   nonRows.forEach(r=>{
     const isMain = r.kind==='본관';
-    set('n1_mdia', isMain ? (r.dia||'') : '', 9.5);
+    set('n1_mdia', isMain ? fmtDia(r.dia) : '', 9.5);
     set('n1_mlen', isMain ? (r.len?r.len+'M':'') : '', 9.5);
-    set('n1_sdia', isMain ? '' : (r.dia||''), 9.5);
+    set('n1_sdia', isMain ? '' : fmtDia(r.dia), 9.5);
     set('n1_slen', isMain ? '' : (r.len?r.len+'M':''), 9.5);
-    set('n1_tdia', r.dia||'', 9.5);
+    set('n1_tdia', fmtDia(r.dia), 9.5);
     set('n1_tlen', r.len?r.len+'M':'', 9.5);
   });
 
@@ -874,11 +903,11 @@ function gatherPlanTokenValues(){
   }
   repRows.forEach((r,i)=>{
     const n=i+1, isMain = r.kind==='본관';
-    vals[`R${n}_MDIA`] = isMain ? (r.dia||'') : '';
+    vals[`R${n}_MDIA`] = isMain ? fmtDia(r.dia) : '';
     vals[`R${n}_MLEN`] = isMain ? (r.len?r.len+'M':'') : '';
-    vals[`R${n}_SDIA`] = isMain ? '' : (r.dia||'');
+    vals[`R${n}_SDIA`] = isMain ? '' : fmtDia(r.dia);
     vals[`R${n}_SLEN`] = isMain ? '' : (r.len?r.len+'M':'');
-    vals[`R${n}_TDIA`] = r.dia||'';
+    vals[`R${n}_TDIA`] = fmtDia(r.dia);
     vals[`R${n}_TLEN`] = r.len?r.len+'M':'';
   });
   const repSum = pipeGroupSummary('신고대상');
@@ -887,11 +916,11 @@ function gatherPlanTokenValues(){
   vals.N1_MDIA=''; vals.N1_MLEN=''; vals.N1_SDIA=''; vals.N1_SLEN=''; vals.N1_TDIA=''; vals.N1_TLEN='';
   nonRows.forEach(r=>{
     const isMain = r.kind==='본관';
-    vals.N1_MDIA = isMain ? (r.dia||'') : '';
+    vals.N1_MDIA = isMain ? fmtDia(r.dia) : '';
     vals.N1_MLEN = isMain ? (r.len?r.len+'M':'') : '';
-    vals.N1_SDIA = isMain ? '' : (r.dia||'');
+    vals.N1_SDIA = isMain ? '' : fmtDia(r.dia);
     vals.N1_SLEN = isMain ? '' : (r.len?r.len+'M':'');
-    vals.N1_TDIA = r.dia||'';
+    vals.N1_TDIA = fmtDia(r.dia);
     vals.N1_TLEN = r.len?r.len+'M':'';
   });
 

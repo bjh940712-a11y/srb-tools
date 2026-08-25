@@ -575,9 +575,18 @@ const APP_TEMPLATES = {
     nameBox: { x0:155, x1:528, yBottom:540, yTop:567, baseline:550, fontSize:12.5 },
     // 작성년월일이 있던 자리("2026 년 08 월    일" 형태, 일자는 항상 공란)
     dateBox: { x0:396, x1:528, yBottom:456, yTop:478, baseline:466, fontSize:10.5 },
+    // checkbox: "[" "]" 는 원본에 고정된 글자이고 그 "안쪽 빈칸"에만 √(또는 공백)이 들어간다.
+    // x0/x1은 실제 샘플 PDF를 600dpi로 렌더링해 "[" "]" 잉크가 찍힌 픽셀 경계를 직접 측정해
+    // 대괄호를 절대 건드리지 않는 안쪽 여백만 남긴 값이고, y는 대괄호와 동일한 텍스트 베이스라인이다.
     checkboxes: {
-      title: { normal:{x:278,y:752}, change:{x:278,y:732}, size:15 },
-      law:   { normal:{x:288,y:499}, change:{x:333,y:499}, size:10 }
+      title: {
+        normal:{x0:278.4,x1:292.0,y:752.4}, change:{x0:278.4,x1:292.0,y:732.3},
+        size:15, ascend:12.3, descend:1.6
+      },
+      law: {
+        normal:{x0:281.2,x1:298.7,y:498.8}, change:{x0:331.2,x1:343.7,y:498.8},
+        size:10, ascend:8.5, descend:1.3
+      }
     }
   },
   approve: {
@@ -585,8 +594,14 @@ const APP_TEMPLATES = {
     nameBox: { x0:150, x1:528, yBottom:586, yTop:611, baseline:596, fontSize:11.5 },
     dateBox: { x0:396, x1:528, yBottom:516, yTop:538, baseline:526, fontSize:10.5 },
     checkboxes: {
-      title: { normal:{x:257,y:759}, change:{x:257,y:740}, size:15 },
-      law:   { normal:{x:264,y:548}, change:{x:311,y:548}, size:10 }
+      title: {
+        normal:{x0:256.5,x1:270.3,y:759.0}, change:{x0:256.5,x1:270.3,y:740.3},
+        size:15, ascend:12.3, descend:1.6
+      },
+      law: {
+        normal:{x0:262.7,x1:273.9,y:548.3}, change:{x0:305.8,x1:321.4,y:548.3},
+        size:10, ascend:8.5, descend:1.3
+      }
     }
   }
 };
@@ -630,27 +645,26 @@ function drawTextLeft(ctx, text, x, baselineY, fontSize){
   ctx.font = `${fontSize}px "Malgun Gothic","맑은 고딕",sans-serif`;
   ctx.fillText(text, x, baselineY);
 }
-// checkbox 좌표(x,y)는 pdfjs 텍스트 추출값 그대로(√ 글자의 좌하단 기준점)이므로, 지우고 다시 그릴 때도
-// 같은 기준으로 맞춘다. size는 원본에서 측정한 글자 높이(title=15pt, law=10pt).
-function checkboxCanvasRect(pt, size, scale, pageHeightPt){
-  const padX = size*0.35, padYBelow = size*0.35, padYAbove = size*0.25;
-  const x0 = pt.x - padX, x1 = pt.x + size + padX;
-  const yBottomPt = pt.y - padYBelow, yTopPt = pt.y + size + padYAbove;
+// slot.x0~x1은 "[" "]" 대괄호 잉크 사이의 안쪽 빈칸만 지우도록 실측한 범위(대괄호 자체는 침범하지
+// 않음), slot.y는 대괄호·"신고서" 등 주변 글자와 동일한 텍스트 베이스라인이다. √를 그릴 때도 같은
+// 베이스라인(slot.y)에 그리므로 주변 글자와 높이가 정확히 맞는다.
+function checkboxCanvasRect(slot, pair, scale, pageHeightPt){
+  const yTopPt = slot.y + pair.ascend, yBottomPt = slot.y - pair.descend;
   return {
-    x: x0*scale, w: (x1-x0)*scale,
+    x: slot.x0*scale, w: (slot.x1-slot.x0)*scale,
     yTopPx: (pageHeightPt - yTopPt)*scale, hPx: (yTopPt-yBottomPt)*scale,
-    baselinePx: (pageHeightPt - (pt.y + size*0.78))*scale, // √ 글자의 시각적 베이스라인 근사치
-    centerX: (x0+x1)/2*scale
+    baselinePx: (pageHeightPt - slot.y)*scale,
+    centerX: (slot.x0+slot.x1)/2*scale
   };
 }
 function eraseAndDrawCheckbox(ctx, pair, variant, scale, pageHeightPt){
   // normal/change 두 자리 모두 일단 지우고, 선택된 자리에만 √를 새로 그린다.
   ['normal','change'].forEach(key=>{
-    const r = checkboxCanvasRect(pair[key], pair.size, scale, pageHeightPt);
+    const r = checkboxCanvasRect(pair[key], pair, scale, pageHeightPt);
     ctx.fillStyle = '#fff';
     ctx.fillRect(r.x, r.yTopPx, r.w, r.hPx);
   });
-  const r = checkboxCanvasRect(pair[variant], pair.size, scale, pageHeightPt);
+  const r = checkboxCanvasRect(pair[variant], pair, scale, pageHeightPt);
   ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = `${pair.size*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
   ctx.fillText('√', r.centerX, r.baselinePx);

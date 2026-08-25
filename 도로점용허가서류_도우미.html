@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>도로점용허가서류 도우미</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#f7f7f5; --card:#fff; --border:#e3e1dc; --text:#2b2a27; --muted:#8a8780;
+    --accent:#c15f3c; --accent-dark:#a34e30; --ok:#4a7c59; --err:#b3432b; --blue:#3b6ea5;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;
+    background:var(--bg);color:var(--text);padding:28px 14px;}
+  .wrap{max-width:1040px;margin:0 auto;}
+  h1{font-size:22px;margin:0 0 4px;}
+  p.sub{color:var(--muted);margin:0 0 22px;font-size:13.5px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:14px;}
+  .card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+  .step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+    border-radius:50%;background:var(--accent);color:#fff;font-size:12.5px;flex-shrink:0;}
+  .drop{border:2px dashed var(--border);border-radius:10px;padding:20px;text-align:center;
+    color:var(--muted);cursor:pointer;transition:.15s;font-size:13.5px;}
+  .drop:hover,.drop.drag{border-color:var(--accent);background:#fdf5f1;color:var(--accent-dark);}
+  input[type=file]{display:none;}
+  .info{font-size:13px;line-height:1.8;margin-top:12px;}
+  .info b{color:var(--blue);}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+  label.f{font-size:13px;color:var(--muted);flex-shrink:0;min-width:96px;}
+  input[type=text],input[type=number],input[type=month],select{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13.5px;background:#fff;}
+  input[type=text]{flex:1;min-width:140px;}
+  input[type=number]{width:90px;}
+  button.btn{border:none;border-radius:8px;padding:10px 16px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;}
+  .btn.primary{background:var(--accent);color:#fff;}
+  .btn.primary:hover{background:var(--accent-dark);}
+  .btn.secondary{background:#eee;color:var(--text);}
+  .btn.secondary:hover{background:#e0e0e0;}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  table.editor{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;}
+  table.editor th{background:#faf9f7;border:1px solid var(--border);padding:6px 5px;font-weight:600;color:var(--muted);}
+  table.editor td{border:1px solid var(--border);padding:3px;}
+  table.editor input{width:100%;border:none;padding:5px 4px;font-size:12.5px;background:transparent;}
+  table.editor input:focus{outline:1.5px solid var(--accent);border-radius:4px;}
+  table.editor td.del{text-align:center;}
+  table.editor td.order{text-align:center;white-space:nowrap;}
+  table.editor td.order button{padding:3px 6px;font-size:11px;line-height:1;margin:1px;}
+  table.editor td.order button:disabled{opacity:.25;cursor:default;}
+  table.photo{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;}
+  table.photo th{background:#faf9f7;border:1px solid var(--border);padding:6px 5px;font-weight:600;color:var(--muted);}
+  table.photo td{border:1px solid var(--border);padding:6px;vertical-align:middle;}
+  table.photo input{width:100%;border:none;padding:5px 4px;font-size:12.5px;background:transparent;}
+  table.photo input:focus{outline:1.5px solid var(--accent);border-radius:4px;}
+  table.photo .thumbs{display:flex;gap:6px;}
+  table.photo .thumbs img{width:64px;height:48px;object-fit:cover;border-radius:4px;border:1px solid var(--border);}
+  table.photo .thumbs .none{width:64px;height:48px;border-radius:4px;border:1px dashed var(--border);
+    display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted);text-align:center;}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;
+    padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:99;}
+  .toast.show{opacity:1;}
+  #renderHost{position:absolute;left:-99999px;top:0;background:#fff;}
+  .sitenav{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap;}
+  .sitenav a{font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;
+    border:1.5px solid var(--border);color:var(--muted);background:#fff;transition:.15s;}
+  .sitenav a:hover{border-color:var(--accent);color:var(--accent-dark);}
+  .sitenav a.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
+  .tabs button{border:1.5px solid var(--border);background:#fff;color:var(--muted);border-radius:20px;
+    padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;}
+  .tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .previewOuter{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#e9e8e4;padding:16px;}
+  .constgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 14px;margin-top:8px;}
+  .constgrid .ci{font-size:12px;color:var(--muted);}
+  .constgrid input{width:100%;}
+  details{margin-top:10px;}
+  summary{cursor:pointer;font-size:13px;color:var(--blue);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="sitenav">
+    <a href="index.html">① 시공일지 변환·병합</a>
+    <a href="소규모배관공사_준공도우미.html">② 소규모 배관공사 준공 도우미</a>
+    <a href="소규모포장공사_준공도우미.html">③ 소규모 포장공사 준공 도우미</a>
+    <a href="공사계획_신고승인_작성_도우미.html">④ 공사계획 신고/승인 작성 도우미</a>
+    <a href="도로점용허가서류_도우미.html" class="on">⑤ 도로점용허가서류 도우미</a>
+  </div>
+  <h1>도로점용허가서류 도우미</h1>
+  <p class="sub">소규모 품의 원본 엑셀 업로드 → 현장 목록 확인/수정 → 도로점용허가신청서·도로굴착총괄표·굴착허가점용료 PDF 3종 자동 생성. 모든 처리는 브라우저 안에서만 이루어집니다(서버 업로드 없음).</p>
+
+  <div class="card">
+    <h2><span class="step">1</span> 원본 엑셀 업로드 <span style="font-weight:400;color:var(--muted);font-size:12px;">("0. 소규모품의" 시트의 "4. 작업발주서" 표를 자동 인식 · 여러 건을 한 번에 올리면 하나로 합쳐서 처리)</span></h2>
+    <div class="drop" id="xlsDrop">소규모 투자·공급계약·발주서 품의 엑셀(.xlsx)을 끌어다 놓거나 클릭해서 선택 (여러 개 선택 가능)
+      <input type="file" id="xlsInput" accept=".xls,.xlsx" multiple></div>
+    <div class="info" id="xlsInfo" style="display:none;"></div>
+    <div class="row" id="xlsResetRow" style="display:none;">
+      <button class="btn secondary small" id="btnResetXls">업로드 초기화 (처음부터 다시)</button>
+    </div>
+  </div>
+
+  <div class="card" id="cardSites" style="display:none;">
+    <h2><span class="step">2</span> 현장 목록 확인 / 수정</h2>
+    <div id="sitesTableWrap"></div>
+    <div class="row">
+      <button class="btn secondary small" id="btnAddRow">+ 현장 행 추가</button>
+    </div>
+    <div class="hint">엑셀에서 자동으로 읽은 값입니다. 구주소·관경·연장·포장종류 등은 셀을 직접 클릭해서 수정할 수 있습니다.</div>
+  </div>
+
+  <div class="card" id="cardOpt" style="display:none;">
+    <h2><span class="step">3</span> 공통 정보</h2>
+    <div class="row">
+      <label class="f">도로관리청</label><input type="text" id="authority" value="영천시">
+      <label class="f">신청(등록)월</label><input type="month" id="startMonth">
+    </div>
+    <div class="hint" id="periodPreview"></div>
+    <details>
+      <summary>점용료 계산 상수 (필요시에만 수정하세요)</summary>
+      <div class="constgrid">
+        <div><div class="ci">굴착폭(m)</div><input type="number" id="cExcavW" value="0.8" step="0.1"></div>
+        <div><div class="ci">일시점용료 단가(원/㎡·일)</div><input type="number" id="cIlsiUnit" value="150"></div>
+        <div><div class="ci">일시점용료 감면율</div><input type="number" id="cIlsiDiscount" value="0.5" step="0.1"></div>
+        <div><div class="ci">일시점용 소요일수</div><input type="number" id="cIlsiDays" value="10"></div>
+        <div><div class="ci">영구점용료 단가(원/m)</div><input type="number" id="cPermUnit" value="200"></div>
+        <div><div class="ci">영구점용료 감면율</div><input type="number" id="cPermDiscount" value="0.5" step="0.1"></div>
+        <div><div class="ci">잔여월수(자동계산, 수정가능)</div><input type="number" id="cPermMonths" value="8"></div>
+        <div><div class="ci">연간 개월수</div><input type="number" id="cYearMonths" value="12"></div>
+        <div><div class="ci">버림단위(절사)</div>
+          <select id="cRoundUnit">
+            <option value="0.1">0.1원</option>
+            <option value="1" selected>1원</option>
+            <option value="10">10원</option>
+            <option value="100">100원</option>
+          </select>
+        </div>
+      </div>
+      <div class="hint">잔여월수는 "신청(등록)월"을 기준으로 (12-신청월)로 자동 계산됩니다. 연말 사용료 안분 방식이 다르면 직접 수정하세요. 일시·영구 점용료는 선택한 버림단위 미만을 절사한 뒤 합계를 계산합니다.</div>
+    </details>
+  </div>
+
+  <div class="card" id="cardPreview" style="display:none;">
+    <h2><span class="step">4</span> 미리보기 &amp; PDF 저장</h2>
+    <div class="tabs">
+      <button class="on" data-t="app">도로점용허가신청서</button>
+      <button data-t="total">도로굴착총괄표</button>
+      <button data-t="fee">굴착허가점용료</button>
+    </div>
+    <div class="previewOuter"><div id="previewArea"></div></div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn secondary" id="btnPdfApp">신청서 PDF 저장</button>
+      <button class="btn secondary" id="btnPdfTotal">총괄표 PDF 저장</button>
+      <button class="btn secondary" id="btnPdfFee">점용료 PDF 저장</button>
+      <button class="btn primary" id="btnPdfAll">3개 모두 저장 (1개 PDF로 합치기)</button>
+    </div>
+  </div>
+
+  <div class="card" id="cardPhoto" style="display:none;">
+    <h2><span class="step">5</span> 수요처별 사진대지 <span style="font-weight:400;color:var(--muted);font-size:12px;">(각 수요처의 위치도 시트에서 위치 현황도·현장사진 2장을 자동으로 읽어옵니다)</span></h2>
+    <div id="photoInfo" class="hint"></div>
+    <div id="photoTableWrap"></div>
+    <div class="row" style="margin-top:6px;">
+      <button class="btn primary" id="btnPdfPhotoAll">전체 사진대지 PDF 저장 (1개로 합치기)</button>
+      <button class="btn secondary" id="btnPdfPhotoEach">수요처별 개별저장 (zip)</button>
+    </div>
+  </div>
+</div>
+
+<div id="renderHost"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const { jsPDF } = window.jspdf;
+const $ = id => document.getElementById(id);
+const norm = v => String(v==null?'':v).replace(/\s+/g,'');
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+
+/* ===================== 회사 고정 정보 ===================== */
+const COMPANY = {
+  name:'서라벌도시가스㈜', regno:'171211-0024180',
+  addr:'경주시 유림로5번길 183', tel:'054-778-8114', ceo:'김 준 석'
+};
+
+let sites = []; // {name, oldAddr, newAddr, dia, len, pave, due, _src}
+let photoSites = []; // {sheetName, name, oldAddr, title, loc, img1, img2, _src}
+let loadedFiles = []; // {name, siteCount, photoCount, error}
+
+/* ===================== 1. 엑셀 업로드/파싱 (여러 건 동시 업로드 지원) ===================== */
+function bindDrop(dropId, inputId, handler){
+  const drop=$(dropId), inp=$(inputId);
+  drop.addEventListener('click',()=>inp.click());
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');handler(e.dataTransfer.files);});
+  inp.addEventListener('change',()=>{handler(inp.files); inp.value='';});
+}
+bindDrop('xlsDrop','xlsInput',files=>{
+  const arr = Array.from(files).filter(f=>/\.xlsx?$/i.test(f.name));
+  if(arr.length) handleFiles(arr);
+});
+$('btnResetXls').addEventListener('click', resetAll);
+
+function resetAll(){
+  sites = []; photoSites = []; loadedFiles = [];
+  $('xlsInfo').style.display='none'; $('xlsInfo').innerHTML='';
+  $('xlsResetRow').style.display='none';
+  $('cardSites').style.display='none';
+  $('cardOpt').style.display='none';
+  $('cardPreview').style.display='none';
+  $('cardPhoto').style.display='none';
+}
+
+// 여러 파일을 순서대로(파일 하나가 실패해도 나머지는 계속) 처리한 뒤 화면을 한 번에 갱신한다.
+async function handleFiles(files){
+  for(const file of files){
+    try{
+      const r = await loadOneFile(file);
+      loadedFiles.push({name:file.name, siteCount:r.siteCount, photoCount:r.photoCount, error:null});
+    }catch(err){
+      loadedFiles.push({name:file.name, siteCount:0, photoCount:0, error:err.message});
+    }
+  }
+  renderLoadedFilesInfo();
+  syncPhotoOrderToSites(); // 여러 파일을 합쳤을 때도 처음부터 현장 목록 순서와 맞춰 놓는다
+  if(sites.length){
+    $('cardSites').style.display='block';
+    $('cardOpt').style.display='block';
+    $('cardPreview').style.display='block';
+    if(!$('startMonth').value){
+      const d=new Date();
+      $('startMonth').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      updatePermMonths();
+    }
+    renderSitesTable();
+    renderPreview();
+  }
+  if(photoSites.length || sites.length){
+    $('cardPhoto').style.display='block';
+    renderPhotoTable();
+  }
+  $('xlsResetRow').style.display = loadedFiles.length ? 'flex' : 'none';
+}
+
+function renderLoadedFilesInfo(){
+  $('xlsInfo').style.display='block';
+  $('xlsInfo').innerHTML = loadedFiles.map(f=>{
+    if(f.error) return `⚠️ <b>${f.name}</b> — 읽기 실패: ${f.error}`;
+    return `✅ <b>${f.name}</b> — 현장 ${f.siteCount}개${f.photoCount?`, 사진대지 ${f.photoCount}건`:''}`;
+  }).join('<br>') + (loadedFiles.length>1 ? `<br><b>합계: 현장 ${sites.length}개 / 사진대지 ${photoSites.length}건</b>` : '');
+}
+
+// 파일 하나를 읽어 sites/photoSites 배열에 "추가"한다 (기존 내용을 지우지 않음 - 여러 건 합산용)
+async function loadOneFile(file){
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:'array'});
+  let sheetName = wb.SheetNames.find(n=>norm(n).includes('소규모품의')) || wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:''});
+
+  // "4. 작업발주서" 제목 행 찾기 (시트 맨 위 전체 제목에도 "작업발주서"라는 말이 들어있을 수 있어
+  // 마지막으로 매칭되는 행을 사용한다 - 섹션 제목이 항상 더 아래에 있음)
+  let titleRow = -1;
+  for(let r=0;r<rows.length;r++){
+    for(let c=0;c<rows[r].length;c++){
+      if(norm(rows[r][c]).includes('작업발주서')){ titleRow=r; }
+    }
+  }
+  if(titleRow<0) throw new Error('"작업발주서" 표를 찾지 못했습니다.');
+  const headerRow = rows[titleRow+1] || [];
+  const subRow = rows[titleRow+2] || [];
+  const dataStart = titleRow+3;
+
+  const findCol = (re, arr) => { for(let c=0;c<arr.length;c++){ if(re.test(norm(arr[c]))) return c; } return -1; };
+  const colName = findCol(/^수요처명$/, headerRow);
+  const colOld  = findCol(/^주소$/, headerRow);
+  const colNew  = findCol(/^신주소$/, headerRow);
+  const colDue  = findCol(/^준공기한$/, headerRow);
+  const colPave = findCol(/^포장종류$/, headerRow);
+  // 배관공사 관경/연장은 하위행(subRow)에서 '관경(A)'가 아닌 순수 '관경'과, 그 오른쪽의 '연장'을 찾는다
+  let colDia=-1, colLen=-1;
+  for(let c=0;c<subRow.length;c++){
+    if(norm(subRow[c])==='관경'){ colDia=c;
+      for(let c2=c+1;c2<subRow.length;c2++){ if(norm(subRow[c2])==='연장'){ colLen=c2; break; } }
+      break;
+    }
+  }
+  if(colName<0 || colDia<0 || colLen<0) throw new Error('표 열 구성을 인식하지 못했습니다.');
+
+  const newSites = [];
+  for(let r=dataStart;r<rows.length;r++){
+    const row = rows[r]||[];
+    const name = row[colName];
+    const nameStr = name===undefined ? '' : String(name).trim();
+    if(nameStr==='' || norm(nameStr)==='계') break; // 표 끝(빈 행/합계 행)
+    // 연장이 0인 행은 실제 굴착 현장이 아니라 병합 셀 잔재나 소계용 잡음 행일 가능성이 높으므로
+    // 표를 끝냈다고 단정하지 않고(뒤에 진짜 데이터가 더 있을 수 있음) 이 행만 건너뛴다.
+    if((Number(row[colLen])||0) <= 0) continue;
+    newSites.push({
+      name: nameStr,
+      oldAddr: String(colOld>=0?row[colOld]:'').trim(),
+      newAddr: String(colNew>=0?row[colNew]:'').trim(),
+      dia: Number(row[colDia])||0,
+      len: Number(row[colLen])||0,
+      pave: String(colPave>=0?row[colPave]:'A.S.P').trim()||'A.S.P',
+      due: String(colDue>=0?row[colDue]:'').trim(),
+      _src: file.name
+    });
+  }
+  if(!newSites.length) throw new Error('현장 데이터를 찾지 못했습니다.');
+  sites.push(...newSites);
+
+  // 사진대지(수요처별 위치도 시트)는 별도 파이프라인 - 실패해도 위 3종 문서 기능에는 영향 없게 분리
+  let photoCount = 0;
+  try{
+    const newPhotoSites = await extractPhotoSites(buf, wb);
+    newPhotoSites.forEach(p=>p._src=file.name);
+    photoSites.push(...newPhotoSites);
+    photoCount = newPhotoSites.length;
+  }catch(err){ /* 사진대지 추출 실패는 무시하고 3종 문서는 그대로 진행 */ }
+
+  return {siteCount:newSites.length, photoCount};
+}
+
+/* ===================== 1-b. 사진대지 - 수요처별 위치도 시트에서 이미지 추출 =====================
+   최근 엑셀은 "셀 안에 그림 삽입"(그림을 셀 값처럼 넣는 기능)을 쓰면 이미지가 일반 drawing이
+   아니라 xl/richData(리치 값) 체계로 저장된다. 셀의 vm 속성 -> xl/metadata.xml의 valueMetadata
+   목록(순번, 1부터 시작) -> rvIndex -> xl/richData/richValueRel.xml의 rel 순서(0부터) -> rId
+   -> xl/richData/_rels/richValueRel.xml.rels -> 실제 xl/media/imageN.png 순으로 따라가야 한다. */
+function xmlAttr(tag, name){ const m = tag.match(new RegExp(name+'="([^"]*)"')); return m?m[1]:null; }
+
+async function buildSheetPathMap(zip){
+  const wbXml = await zip.file('xl/workbook.xml').async('string');
+  const relsFile = zip.file('xl/_rels/workbook.xml.rels');
+  const relsXml = relsFile ? await relsFile.async('string') : '';
+  const relsMap = {};
+  for(const m of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)){
+    const id = xmlAttr(m[0],'Id'), target = xmlAttr(m[0],'Target');
+    if(id && target) relsMap[id] = target;
+  }
+  const map = {};
+  for(const tag of wbXml.match(/<sheet\b[^>]*\/>/g)||[]){
+    const name = xmlAttr(tag,'name'), rid = xmlAttr(tag,'r:id');
+    if(name && rid && relsMap[rid]) map[name] = 'xl/' + relsMap[rid].replace(/^\.?\//,'');
+  }
+  return map;
+}
+
+// 셀 vm 번호 -> xl/media/imageN.png 경로로 바꿔주는 resolver 함수를 만든다.
+// 워크북에 셀 삽입 이미지가 하나도 없으면(구버전 엑셀로 작업한 파일 등) null을 반환한다.
+async function buildImageResolver(zip){
+  const metaFile = zip.file('xl/metadata.xml');
+  const relOrderFile = zip.file('xl/richData/richValueRel.xml');
+  const relsFile = zip.file('xl/richData/_rels/richValueRel.xml.rels');
+  if(!metaFile || !relOrderFile || !relsFile) return null;
+  const metaXml = await metaFile.async('string');
+  const relOrderXml = await relOrderFile.async('string');
+  const relsXml = await relsFile.async('string');
+
+  const vmBlockMatch = metaXml.match(/<valueMetadata\b[^>]*>([\s\S]*?)<\/valueMetadata>/);
+  if(!vmBlockMatch) return null;
+  const rvIndices = [...vmBlockMatch[1].matchAll(/<rc\b[^>]*\/>/g)]
+    .map(m=>Number(xmlAttr(m[0],'v')));
+
+  const relOrder = [...relOrderXml.matchAll(/<rel\b[^>]*\/>/g)]
+    .map(m=>xmlAttr(m[0],'r:id'));
+
+  const relsMap = {};
+  for(const m of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)){
+    const id = xmlAttr(m[0],'Id'), target = xmlAttr(m[0],'Target');
+    if(id && target) relsMap[id] = target;
+  }
+
+  return function resolve(vm){
+    const rvIndex = rvIndices[vm-1];
+    if(rvIndex===undefined) return null;
+    const rId = relOrder[rvIndex];
+    if(!rId) return null;
+    const target = relsMap[rId];
+    if(!target) return null;
+    return 'xl/media/' + target.split('/').pop();
+  };
+}
+
+function mimeFor(path){
+  const ext = path.split('.').pop().toLowerCase();
+  if(ext==='jpg'||ext==='jpeg') return 'image/jpeg';
+  if(ext==='gif') return 'image/gif';
+  if(ext==='bmp') return 'image/bmp';
+  return 'image/png';
+}
+
+// 시트 XML 원문에서 특정 셀(예: "A2")의 vm 속성값을 뽑아낸다.
+function cellVm(sheetXml, ref){
+  const m = sheetXml.match(new RegExp('<c r="'+ref+'"[^>]*/?>', ''));
+  if(!m) return null;
+  const v = xmlAttr(m[0], 'vm');
+  return v ? Number(v) : null;
+}
+
+async function extractPhotoSites(buf, wb){
+  const zip = await JSZip.loadAsync(buf);
+  const resolve = await buildImageResolver(zip);
+  if(!resolve) return []; // 셀 삽입 이미지가 없는 워크북
+
+  const sheetPathMap = await buildSheetPathMap(zip);
+  const authority = $('authority').value.trim()||'영천시';
+  const out = [];
+
+  for(const sheetName of wb.SheetNames){
+    if(norm(sheetName).includes('소규모품의')) continue; // 요약 시트는 제외
+    const path = sheetPathMap[sheetName];
+    const zf = path ? zip.file(path) : null;
+    if(!zf) continue;
+    const sheetXml = await zf.async('string');
+    const vm1 = cellVm(sheetXml, 'A2');
+    const vm2 = cellVm(sheetXml, 'H2');
+    if(vm1===null && vm2===null) continue; // 위치도가 없는 시트(요약/기타)는 건너뜀
+
+    const ws = wb.Sheets[sheetName];
+    const name = (ws && ws['A19'] ? String(ws['A19'].v) : '').trim();
+    const addr = (ws && ws['B19'] ? String(ws['B19'].v) : '').trim();
+    if(!name) continue;
+
+    let img1=null, img2=null;
+    if(vm1!==null){ const p=resolve(vm1); if(p){ const f=zip.file(p); if(f) img1 = 'data:'+mimeFor(p)+';base64,'+await f.async('base64'); } }
+    if(vm2!==null){ const p=resolve(vm2); if(p){ const f=zip.file(p); if(f) img2 = 'data:'+mimeFor(p)+';base64,'+await f.async('base64'); } }
+
+    out.push({ sheetName, name, oldAddr: addr, title: name, loc: `${authority} ${addr}`, img1, img2 });
+  }
+  return out;
+}
+
+/* ===================== 2. 현장 목록 편집 테이블 ===================== */
+function moveSite(i, dir){
+  const j = i+dir;
+  if(j<0 || j>=sites.length) return;
+  [sites[i], sites[j]] = [sites[j], sites[i]];
+  syncPhotoOrderToSites();
+  renderSitesTable(); renderPreview(); renderPhotoTable();
+}
+// 사진대지(photoSites) 순서를 현장 목록(sites) 순서에 맞춰 다시 정렬한다.
+// 매칭은 구주소(정규화)를 우선으로 하고, 구주소가 없거나 안 맞으면 수요처명으로 보조 매칭한다.
+// (원본 엑셀 특성상 "작업발주서" 표의 수요처명과 위치도 시트 A19의 수요처명이 "정일환 상가" /
+//  "정일환 상가주택"처럼 살짝 다르게 적혀 있는 경우가 있어, 이름만으로는 매칭이 깨질 수 있다.
+//  구주소는 두 표 모두 같은 값을 그대로 쓰기 때문에 더 안정적인 매칭 키다)
+// photoSites 쪽에만 있고 sites에는 매칭되는 항목이 없는 경우(예: 위치도 시트만 있고 작업발주서
+// 표엔 없는 경우)는 원래 순서를 유지한 채 맨 뒤에 그대로 남긴다.
+function syncPhotoOrderToSites(){
+  if(!photoSites.length) return;
+  const used = new Array(photoSites.length).fill(false);
+  const ordered = [];
+  sites.forEach(s=>{
+    const addrKey = norm(s.oldAddr);
+    const nameKey = norm(s.name);
+    let idx = -1;
+    if(addrKey) idx = photoSites.findIndex((p,i)=>!used[i] && norm(p.oldAddr)===addrKey);
+    if(idx<0 && nameKey) idx = photoSites.findIndex((p,i)=>!used[i] && norm(p.name)===nameKey);
+    if(idx>=0){ used[idx]=true; ordered.push(photoSites[idx]); }
+  });
+  photoSites.forEach((p,i)=>{ if(!used[i]) ordered.push(p); });
+  photoSites = ordered;
+}
+function renderSitesTable(){
+  const cols = [
+    ['name','수요처명',120],['oldAddr','구주소',150],['newAddr','신주소',150],
+    ['dia','관경(A)',70],['len','연장(m)',70],['pave','포장종류',80],['due','준공기한',80]
+  ];
+  let html = '<table class="editor"><thead><tr><th style="width:56px;">순서</th>'+cols.map(c=>`<th>${c[1]}</th>`).join('')+'<th style="width:34px;"></th></tr></thead><tbody>';
+  sites.forEach((s,i)=>{
+    html += '<tr>'
+      + `<td class="order"><button class="btn secondary small" data-up="${i}" title="위로" ${i===0?'disabled':''}>▲</button><button class="btn secondary small" data-down="${i}" title="아래로" ${i===sites.length-1?'disabled':''}>▼</button></td>`
+      + cols.map(c=>`<td style="min-width:${c[2]}px;"><input data-i="${i}" data-k="${c[0]}" value="${(s[c[0]]??'').toString().replace(/"/g,'&quot;')}"></td>`).join('')
+      + `<td class="del"><button class="btn secondary small" data-del="${i}">✕</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+  $('sitesTableWrap').innerHTML = html;
+  $('sitesTableWrap').querySelectorAll('input').forEach(inp=>{
+    inp.addEventListener('input', e=>{
+      const i=+e.target.dataset.i, k=e.target.dataset.k;
+      sites[i][k] = (k==='dia'||k==='len') ? (Number(e.target.value)||0) : e.target.value;
+      renderPreview();
+    });
+  });
+  $('sitesTableWrap').querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click', e=>{ sites.splice(+e.target.dataset.del,1); renderSitesTable(); renderPreview(); });
+  });
+  $('sitesTableWrap').querySelectorAll('[data-up]').forEach(btn=>{
+    btn.addEventListener('click', e=>moveSite(+e.target.dataset.up, -1));
+  });
+  $('sitesTableWrap').querySelectorAll('[data-down]').forEach(btn=>{
+    btn.addEventListener('click', e=>moveSite(+e.target.dataset.down, 1));
+  });
+}
+$('btnAddRow').addEventListener('click', ()=>{
+  sites.push({name:'',oldAddr:'',newAddr:'',dia:63,len:0,pave:'A.S.P',due:''});
+  renderSitesTable(); renderPreview();
+});
+
+/* ===================== 3. 공통 정보 & 상수 ===================== */
+function updatePermMonths(){
+  const v = $('startMonth').value; if(!v) return;
+  const month = Number(v.split('-')[1]);
+  $('cPermMonths').value = Math.max(0, 12-month);
+}
+$('startMonth').addEventListener('change', ()=>{ updatePermMonths(); renderPreview(); });
+['authority','cExcavW','cIlsiUnit','cIlsiDiscount','cIlsiDays','cPermUnit','cPermDiscount','cPermMonths','cYearMonths','cRoundUnit']
+  .forEach(id=>$(id).addEventListener('input', renderPreview));
+
+function getConsts(){
+  return {
+    excavW: Number($('cExcavW').value)||0.8,
+    ilsiUnit: Number($('cIlsiUnit').value)||0,
+    ilsiDiscount: Number($('cIlsiDiscount').value)||0,
+    ilsiDays: Number($('cIlsiDays').value)||0,
+    permUnit: Number($('cPermUnit').value)||0,
+    permDiscount: Number($('cPermDiscount').value)||0,
+    permMonths: Number($('cPermMonths').value)||0,
+    yearMonths: Number($('cYearMonths').value)||12,
+    roundUnit: Number($('cRoundUnit').value)||1
+  };
+}
+function chiefTitle(name){
+  name = (name||'').trim();
+  if(!name) return '귀하';
+  if(name.endsWith('시')) return name+'장 귀하';
+  if(name.endsWith('군')) return name.slice(0,-1)+'군수 귀하';
+  if(name.endsWith('구')) return name+'청장 귀하';
+  return name+' 귀하';
+}
+function fmt(n, d){ return (Math.round(n*Math.pow(10,d))/Math.pow(10,d)).toLocaleString('ko-KR',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+// 지정한 버림단위(0.1/1/10/100원) 미만을 절사한다. 부동소수점 오차 보정을 위해 아주 작은 값을 더한다.
+function floorToUnit(v, unit){ return Math.floor(v/unit + 1e-9)*unit; }
+function periodText(){
+  const v=$('startMonth').value; if(!v) return {periodStr:'', dateStr:''};
+  const [y,m] = v.split('-').map(Number);
+  let ey=y, em=m+6; if(em>12){ em-=12; ey+=1; }
+  return {
+    periodStr: `${y}년 ${String(m).padStart(2,'0')}월 ~ ${ey}년 ${String(em).padStart(2,'0')}월`,
+    dateStr: `${y}년 ${String(m).padStart(2,'0')}월 일`,
+    dateWide: `${y}년&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${String(m).padStart(2,'0')}월&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;일`
+  };
+}
+
+/* ===================== 4. 파생 계산 ===================== */
+function locText(s){ const a=$('authority').value.trim(); return `${a} ${s.oldAddr} ${s.name} (${s.oldAddr})`; }
+function mode(arr){ const c={}; arr.forEach(v=>c[v]=(c[v]||0)+1); return Object.keys(c).sort((a,b)=>c[b]-c[a])[0]; }
+
+function computeTotalRows(){
+  const k = getConsts();
+  return sites.map(s=>{
+    const excavArea = s.len*k.excavW;
+    const occW = s.dia/1000;
+    const occArea = occW*s.len;
+    return {...s, excavArea, occW, occArea};
+  });
+}
+function computeFeeRows(){
+  const k = getConsts();
+  return sites.map((s,i)=>{
+    const area = s.len*k.excavW;
+    // 점용료는 지정한 버림단위 미만 절사 - 일시/영구 각각 절사한 뒤 합계를 구한다
+    const ilsi = floorToUnit(area*k.ilsiUnit*k.ilsiDiscount*k.ilsiDays, k.roundUnit);
+    const perm = floorToUnit(k.permUnit*k.permDiscount*k.permMonths/k.yearMonths*s.len, k.roundUnit);
+    return {...s, no:i+1, area, ilsi, perm, sum: ilsi+perm};
+  });
+}
+
+/* ===================== 5. HTML 렌더 (신청서 - 법정서식[별지 제24호] 재현) ===================== */
+// 행정서식 특유의 스타일: 세로선을 거의 쓰지 않고, 섹션 경계는 굵은 실선(이중선),
+// 섹션 내부 행 구분은 가는 점선. 접수번호/접수일자/처리기간 라벨 칸만 회색 음영.
+function buildAppHtml(){
+  const P = periodText();
+  const a = $('authority').value.trim()||'영천시';
+  const totalLen = sites.reduce((s,x)=>s+x.len,0);
+  const totalArea = sites.reduce((s,x)=>s+x.len*getConsts().excavW,0);
+  const first = sites[0]||{oldAddr:'',name:''};
+  const locStr = sites.length ? `${a} ${first.oldAddr} ${first.name}${sites.length>1?` 외 ${sites.length-1}개소`:''} / ${fmt(totalArea,1)}㎡ (${fmt(totalLen,0)}m)` : '';
+  const dia = mode(sites.map(s=>s.dia))||63;
+
+  const F = "font-family:'Malgun Gothic','맑은 고딕',sans-serif;";
+  const DOT = 'border-bottom:1px dotted #999;';   // 섹션 내부 행 구분
+  const cell = (v,st)=>`<td style="padding:9px 10px;font-size:12.5px;vertical-align:middle;${st||''}">${v}</td>`;
+
+  return `<div style="width:780px;background:#fff;padding:30px 34px 26px;${F}color:#111;">
+    <div style="font-size:11px;">■ 도로법 시행규칙[별지 제 24호 서식]</div>
+    <div style="font-size:20px;font-weight:700;text-align:center;letter-spacing:2px;margin:10px 0 14px;">도로점용허가 신청서</div>
+
+    <!-- 접수 행 : 원본 서식처럼 회색 음영이 위아래 굵은 선 사이를 여백 없이 꽉 채운다.
+         (굵은 선을 표의 border로 그리면 PDF 캔버스 변환 시 td 배경이 선을 덮어버리므로,
+          선을 표와 분리된 별도 div로 그려 음영이 선을 침범할 수 없게 한다) -->
+    <div style="height:2px;background:#000;"></div>
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <tr>
+        ${cell('접수번호','width:12%;background:#d9d9d6;')}
+        ${cell('','width:23%;')}
+        ${cell('접수일자','width:12%;background:#d9d9d6;')}
+        ${cell('','width:29%;')}
+        ${cell('처리기간','width:12%;background:#d9d9d6;')}
+        ${cell('','width:12%;')}
+      </tr>
+    </table>
+    <div style="height:2px;background:#000;"></div>
+
+    <!-- 신청인 -->
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <tr>
+        <td rowspan="3" style="width:12%;padding:9px 10px;font-size:12.5px;text-align:center;vertical-align:middle;border-bottom:2px solid #000;border-right:1px solid #bbb;">신청인</td>
+        ${cell(`성명(대표자) : ${COMPANY.name}`,`width:47%;${DOT}`)}
+        ${cell(`법인등록번호 : ${COMPANY.regno}`,`width:41%;${DOT}border-left:1px solid #ccc;`)}
+      </tr>
+      <tr>
+        ${cell(`주소 : ${COMPANY.addr}`,DOT)}
+        ${cell('전자우편',`${DOT}border-left:1px solid #ccc;`)}
+      </tr>
+      <tr style="border-bottom:2px solid #000;">
+        ${cell(`전화번호 : ${COMPANY.tel}`,'')}
+        ${cell('휴대전화','border-left:1px solid #ccc;')}
+      </tr>
+    </table>
+
+    <!-- 신청내용 -->
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <tr>
+        <td rowspan="8" style="width:12%;padding:9px 10px;font-size:12.5px;text-align:center;vertical-align:middle;border-bottom:2px solid #000;border-right:1px solid #bbb;">신청내용</td>
+        ${cell('도로의 종류 : 시도',`width:47%;${DOT}`)}
+        ${cell('노선번호(노선명)',`width:41%;${DOT}border-left:1px solid #ccc;`)}
+      </tr>
+      <tr><td colspan="2" style="padding:9px 10px;font-size:12.5px;${DOT}">점용의 목적 : 도시가스관 지하매설</td></tr>
+      <tr><td colspan="2" style="padding:9px 10px;font-size:12.5px;${DOT}">점용의 장소 및 면적 : ${locStr}</td></tr>
+      <tr>
+        ${cell('점용기간 : 영구(10년)',DOT)}
+        ${cell('굴착기간 : 착공일로부터 10일',`${DOT}border-left:1px solid #ccc;`)}
+      </tr>
+      <tr><td colspan="2" style="padding:9px 10px;font-size:12.5px;${DOT}">점용물의 구조 : 도시가스관 PE ${dia}A</td></tr>
+      <tr><td colspan="2" style="padding:9px 10px;font-size:12.5px;${DOT}">공사의 방법 : 노면 굴착 시공(OPEN CUT)</td></tr>
+      <tr><td colspan="2" style="padding:9px 10px;font-size:12.5px;${DOT}">공사의 시기 : ${P.periodStr}</td></tr>
+      <tr><td colspan="2" style="padding:9px 10px;font-size:12.5px;border-bottom:2px solid #000;">도로의 복구방법 : 신청인 복구</td></tr>
+    </table>
+
+    <!-- 신청 문구 (괘선 없는 자유 문단, 원본 서식처럼 날짜·신청인은 오른쪽 정렬) -->
+    <div style="font-size:12.5px;line-height:1.9;margin:14px 4px 0;">「도로법」 제61조 및 같은 법 시행령 제54조제1항에 따라 위와 같이 도로점용허가를 신청합니다.</div>
+    <div style="font-size:12.5px;text-align:right;margin:34px 24px 0 0;">${P.dateWide}</div>
+    <div style="font-size:12.5px;text-align:right;margin:10px 4px 0 0;">신청인 : ${COMPANY.name} 대표이사 &nbsp;${COMPANY.ceo} <span style="font-size:11.5px;">(서명 또는 인)</span></div>
+
+    <div style="font-size:16px;font-weight:700;margin:14px 0 16px 70px;">${chiefTitle(a)}</div>
+
+    <!-- 첨부서류 : 위아래 굵은 선, 세로선 최소 -->
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;border-top:2px solid #000;border-bottom:2px solid #000;">
+      <tr>
+        <td style="width:11%;padding:10px 8px;font-size:12px;text-align:center;vertical-align:middle;border-right:1px solid #bbb;">첨부서류</td>
+        <td style="width:67%;padding:10px 12px;font-size:11px;line-height:1.75;vertical-align:top;">
+          1. 설계도면(전자도면으로 한정합니다). 다만, 도로의 굴착을 수반하는 도로점용<br>
+          &nbsp;허가의 신청인 경우로서 「도로법 시행령」 제56조제1항에 따라 제출한 사업계<br>
+          &nbsp;획서대로 도로점용에 관한 사업을 할 수 있다는 같은 법 시행령 제56조제3항에<br>
+          &nbsp;따른 통보를 받은 경우(「도로법 시행령」 제56조제1항에 따라 사업계획서를 제<br>
+          &nbsp;출한 경우로 한정합니다)는 제외합니다.<br>
+          2. 도로의 굴착을 수반하는 도로점용허가의 신청인 경우에는 다음 각 목의 서류<br>
+          &nbsp;가. 주요지하매설물 관리자의 의견서<br>
+          &nbsp;나. 주요지하매설물의 사후관리계획(신청인이 주요지하매설물의 관리자인 경우<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;로 한정합니다)<br>
+          &nbsp;다. 「도로법 시행령」 제62조에 따른 도로관리심의회 심의·조정 결과를 반영한<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;안전대책 등에 관한 서류
+        </td>
+        <td style="width:22%;padding:10px 8px;font-size:11.5px;line-height:1.8;text-align:center;vertical-align:middle;border-left:1px solid #bbb;">
+          ⑤수수료<br>1,000원 또는<br>행정청이 속하는<br>지방자치단체의<br>조례로 정하는<br>금액
+        </td>
+      </tr>
+    </table>
+  </div>`;
+}
+
+/* ===================== 6. HTML 렌더 (총괄표) ===================== */
+function buildTotalHtml(){
+  const rows = computeTotalRows();
+  const th = v=>`<th style="border:1px solid #333;padding:6px 4px;font-size:11px;background:#f0efe9;white-space:pre-line;">${v}</th>`;
+  const td = (v,st)=>`<td style="border:1px solid #333;padding:6px 4px;font-size:11px;text-align:center;white-space:pre-line;${st||''}">${v}</td>`;
+  let body = rows.map(r=>`<tr>
+    ${td(locText(r),'text-align:left;font-size:10.5px;')}
+    ${td('기타\n도로')}
+    ${td(r.pave)}
+    ${td(r.dia)}
+    ${td(fmt(r.len,1))}
+    ${td(fmt(getConsts().excavW,1))}
+    ${td(fmt(r.excavArea,1))}
+    ${td(fmt(r.occW,3))}
+    ${td(fmt(r.occArea,3))}
+    ${td('심의 제외')}
+  </tr>`).join('');
+  const sumLen = rows.reduce((s,r)=>s+r.len,0);
+  const sumExcav = rows.reduce((s,r)=>s+r.excavArea,0);
+  const sumOcc = rows.reduce((s,r)=>s+r.occArea,0);
+  return `<div style="width:900px;background:#fff;padding:26px 30px;font-family:'Malgun Gothic',sans-serif;color:#111;">
+    <div style="font-size:19px;font-weight:700;text-align:center;margin-bottom:16px;">도로굴착 총괄표</div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:6px;">1. 총괄표</div>
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:26%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:10%"><col style="width:9%"></colgroup>
+      <thead><tr>${th('공사구간')}${th('구분')}${th('포장\n종별')}${th('관경\n(A)')}${th('연장\n(m)')}${th('굴착폭\n(m)')}${th('굴착면적\n(㎡)')}${th('점용폭\n(m)')}${th('점용면적\n(㎡)')}${th('비고')}</tr></thead>
+      <tbody>${body}
+        <tr>${td('계','font-weight:700;')}${td('')}${td('')}${td('')}${td(fmt(sumLen,1),'font-weight:700;')}${td('')}${td(fmt(sumExcav,1),'font-weight:700;')}${td('')}${td(fmt(sumOcc,3),'font-weight:700;')}${td('')}</tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ===================== 7. HTML 렌더 (점용료) ===================== */
+function buildFeeHtml(){
+  const a = $('authority').value.trim()||'영천시';
+  const rows = computeFeeRows();
+  const feeDec = getConsts().roundUnit < 1 ? 1 : 0; // 버림단위가 0.1원이면 소수 1자리까지 표시
+  const th = (v,st)=>`<th style="border:1px solid #333;padding:6px 4px;font-size:11px;background:#f0efe9;white-space:pre-line;${st||''}">${v}</th>`;
+  const td = (v,st)=>`<td style="border:1px solid #333;padding:6px 4px;font-size:11px;text-align:center;${st||''}">${v}</td>`;
+  let body = rows.map(r=>`<tr>
+    ${td(r.no)}
+    ${td(locText(r),'text-align:left;font-size:10.5px;')}
+    ${td(a)}
+    ${td(r.dia+'A')}
+    ${td(fmt(r.len,1))}
+    ${td(fmt(r.area,1))}
+    ${td(fmt(r.sum,feeDec))}
+    ${td(fmt(r.ilsi,feeDec))}
+    ${td(fmt(r.perm,feeDec))}
+  </tr>`).join('');
+  const sumLen = rows.reduce((s,r)=>s+r.len,0), sumArea = rows.reduce((s,r)=>s+r.area,0);
+  const sumIlsi = rows.reduce((s,r)=>s+r.ilsi,0), sumPerm = rows.reduce((s,r)=>s+r.perm,0);
+  return `<div style="width:900px;background:#fff;padding:26px 30px;font-family:'Malgun Gothic',sans-serif;color:#111;">
+    <div style="font-size:19px;font-weight:700;text-align:center;margin-bottom:16px;">붙 임</div>
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <colgroup><col style="width:6%"><col style="width:28%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:10%"></colgroup>
+      <thead>
+        <tr>${th('순번','')}${th('점 용 장 소 (위치)','')}${th('도로\n관리청','')}${th('관경','')}${th('연장(m)','')}${th('면적(㎡)','')}${th('합계\n(a+b)','')}${th('일시\n점용료-ⓐ','')}${th('영구\n점용료-ⓑ','')}</tr>
+      </thead>
+      <tbody>${body}
+        <tr>${td('계','font-weight:700;')}${td('')}${td('')}${td('')}${td(fmt(sumLen,1),'font-weight:700;')}${td(fmt(sumArea,1),'font-weight:700;')}${td(fmt(sumIlsi+sumPerm,feeDec),'font-weight:700;')}${td(fmt(sumIlsi,feeDec),'font-weight:700;')}${td(fmt(sumPerm,feeDec),'font-weight:700;')}</tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+/* ===================== 7-b. 사진대지 (수요처별) ===================== */
+function renderPhotoTable(){
+  const authority = $('authority').value.trim()||'영천시';
+  $('photoInfo').textContent = photoSites.length
+    ? `${photoSites.length}개 수요처의 위치도 시트에서 사진을 읽었습니다.`
+    : '수요처별 위치도 시트를 찾지 못했습니다. (사진대지 생성을 사용하려면 원본 파일에 "N.동이름 수요처명" 형태의 개별 시트가 있어야 합니다)';
+  if(!photoSites.length){ $('photoTableWrap').innerHTML=''; return; }
+  let html = '<table class="photo"><thead><tr><th style="width:32%;">제목(수요처명)</th><th style="width:34%;">위치</th><th style="width:18%;">사진1 · 사진2</th><th style="width:16%;"></th></tr></thead><tbody>';
+  photoSites.forEach((p,i)=>{
+    html += `<tr>
+      <td><input data-i="${i}" data-k="title" value="${(p.title||'').replace(/"/g,'&quot;')}"></td>
+      <td><input data-i="${i}" data-k="loc" value="${(p.loc||'').replace(/"/g,'&quot;')}"></td>
+      <td><div class="thumbs">
+        ${p.img1?`<img src="${p.img1}">`:'<div class="none">위치도<br>없음</div>'}
+        ${p.img2?`<img src="${p.img2}">`:'<div class="none">현장사진<br>없음</div>'}
+      </div></td>
+      <td><button class="btn secondary small" data-pdf="${i}">PDF 저장</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  $('photoTableWrap').innerHTML = html;
+  $('photoTableWrap').querySelectorAll('input').forEach(inp=>{
+    inp.addEventListener('input', e=>{ photoSites[+e.target.dataset.i][e.target.dataset.k] = e.target.value; });
+  });
+  $('photoTableWrap').querySelectorAll('[data-pdf]').forEach(btn=>{
+    btn.addEventListener('click', e=>savePhotoPdf(+e.target.dataset.pdf));
+  });
+}
+
+function buildPhotoHtml(p){
+  const imgCell = (src,label) => src
+    ? `<img src="${src}" style="max-width:100%;max-height:320px;display:block;margin:0 auto;">`
+    : `<span style="color:#999;">[${label} 없음]</span>`;
+  return `<div style="width:720px;background:#fff;padding:26px 30px;font-family:'Malgun Gothic',sans-serif;color:#111;">
+    <div style="font-size:15px;font-weight:700;">○ ${p.title||''}</div>
+    <div style="font-size:12.5px;margin:8px 0 14px 18px;">${p.loc||''}</div>
+    <table style="border-collapse:collapse;width:100%;">
+      <tr><td style="border:1px solid #333;padding:6px;text-align:center;font-weight:700;font-size:12.5px;background:#f5f4f1;">위치 현황도</td></tr>
+      <tr><td style="border:1px solid #333;height:340px;text-align:center;vertical-align:middle;padding:10px;">${imgCell(p.img1,'사진1')}</td></tr>
+      <tr><td style="border:1px solid #333;padding:6px;text-align:center;font-weight:700;font-size:12.5px;background:#f5f4f1;">현장사진</td></tr>
+      <tr><td style="border:1px solid #333;height:340px;text-align:center;vertical-align:middle;padding:10px;">${imgCell(p.img2,'사진2')}</td></tr>
+    </table>
+  </div>`;
+}
+
+// 사진대지 파일명 규칙: "N. 위치도(수요처명).pdf" - 현장 목록(사진대지) 순서대로 1부터 번호를 매겨
+// 파일 탐색기에서 정렬했을 때 순서가 그대로 유지되게 한다. 못 쓰는 문자만 제거한다.
+function photoFileName(p, idx){
+  const name = (p.title||p.name||'현장').replace(/[\\/:*?"<>|]/g,'').trim() || '현장';
+  return `${idx+1}. 위치도(${name})`;
+}
+async function savePhotoPdf(i){
+  const p = photoSites[i]; if(!p) return;
+  try{
+    toast('PDF 생성 중...');
+    const bytes = await toPdfBytes(buildPhotoHtml(p));
+    download(bytes, `${photoFileName(p,i)}.pdf`);
+    toast('PDF 저장 완료');
+  }catch(e){ toast('실패: '+e.message); }
+}
+async function savePhotoAllPdf(){
+  if(!photoSites.length){ toast('사진대지로 만들 수요처가 없습니다'); return; }
+  try{
+    toast('PDF 생성 중...');
+    const doc = new jsPDF({orientation:'p',unit:'pt',format:'a4'});
+    for(let i=0;i<photoSites.length;i++){
+      const c = await renderToCanvas(buildPhotoHtml(photoSites[i]));
+      addCanvasAsPages(doc, c, i===0);
+    }
+    download(doc.output('arraybuffer'), '사진대지_전체.pdf');
+    toast('PDF 저장 완료');
+  }catch(e){ toast('실패: '+e.message); }
+}
+$('btnPdfPhotoAll').addEventListener('click', savePhotoAllPdf);
+
+// 수요처별로 각각 별도 PDF를 만들되, 브라우저가 한꺼번에 여러 건 다운로드하는 것을 막는 문제를
+// 피하기 위해(3개 문서 합치기 때와 동일한 이유) 파일 하나씩 내려받지 않고 zip 하나로 묶어서 저장한다.
+// zip 안의 각 파일명은 "위치도(수요처명).pdf" 형식이며, 이름이 겹치면 뒤에 번호를 붙인다.
+async function savePhotoEachZip(){
+  if(!photoSites.length){ toast('사진대지로 만들 수요처가 없습니다'); return; }
+  try{
+    toast('PDF 생성 중...');
+    const zip = new JSZip();
+    const used = new Map();
+    for(let i=0;i<photoSites.length;i++){
+      const p = photoSites[i];
+      const bytes = await toPdfBytes(buildPhotoHtml(p));
+      const base = photoFileName(p,i);
+      const n = used.get(base)||0; used.set(base, n+1);
+      const fname = (n===0 ? base : `${base}_${n+1}`) + '.pdf';
+      zip.file(fname, bytes);
+    }
+    const blob = await zip.generateAsync({type:'blob'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='사진대지_개별파일.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    toast('zip 저장 완료');
+  }catch(e){ toast('실패: '+e.message); }
+}
+$('btnPdfPhotoEach').addEventListener('click', savePhotoEachZip);
+
+/* ===================== 8. 미리보기 탭 ===================== */
+let curTab='app';
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.addEventListener('click', ()=>{ curTab=b.dataset.t; document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); renderPreview(); });
+});
+function buildByTab(t){ return t==='app'?buildAppHtml():t==='total'?buildTotalHtml():buildFeeHtml(); }
+function renderPreview(){
+  if(!sites.length) return;
+  $('previewArea').innerHTML = buildByTab(curTab);
+  const P = periodText();
+  $('periodPreview').textContent = P.periodStr ? `공사의 시기: ${P.periodStr} / 신청일자: ${P.dateStr}` : '';
+}
+
+/* ===================== 9. PDF 저장 ===================== */
+async function renderToCanvas(html){
+  const host = $('renderHost');
+  host.innerHTML = html;
+  const el = host.firstElementChild;
+  const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
+  host.innerHTML='';
+  return canvas;
+}
+function addCanvasAsPages(doc, canvas, isFirstPageOfDoc){
+  const pw=595.28, ph=841.89, mg=18;
+  const imgW=pw-mg*2, pageH=ph-mg*2;
+  const fullH=canvas.height*imgW/canvas.width;
+  if(fullH<=pageH){
+    if(!isFirstPageOfDoc) doc.addPage();
+    doc.addImage(canvas.toDataURL('image/jpeg',0.95),'JPEG',mg,mg,imgW,fullH);
+  }else{
+    const sliceH=Math.floor(canvas.width*pageH/imgW);
+    let y=0, first=true;
+    while(y<canvas.height){
+      const h=Math.min(sliceH, canvas.height-y);
+      const c2=document.createElement('canvas'); c2.width=canvas.width; c2.height=h;
+      c2.getContext('2d').drawImage(canvas,0,y,canvas.width,h,0,0,canvas.width,h);
+      if(!isFirstPageOfDoc||!first) doc.addPage();
+      doc.addImage(c2.toDataURL('image/jpeg',0.95),'JPEG',mg,mg,imgW,h*imgW/canvas.width);
+      y+=h; first=false;
+    }
+  }
+}
+function download(bytes, filename){
+  const blob = new Blob([bytes], {type:'application/pdf'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
+}
+async function toPdfBytes(html){
+  const doc = new jsPDF({orientation:'p',unit:'pt',format:'a4'});
+  const c = await renderToCanvas(html);
+  addCanvasAsPages(doc, c, true);
+  return doc.output('arraybuffer');
+}
+async function savePdf(builder, filename){
+  if(!sites.length){ toast('먼저 원본 엑셀을 업로드하세요'); return; }
+  try{ toast('PDF 생성 중...'); const bytes = await toPdfBytes(builder()); download(bytes, filename); toast('PDF 저장 완료'); }
+  catch(e){ toast('실패: '+e.message); }
+}
+// 3개 문서를 한 PDF에 순서대로(신청서 → 총괄표 → 점용료) 이어붙여 저장한다.
+async function saveMergedPdf(){
+  if(!sites.length){ toast('먼저 원본 엑셀을 업로드하세요'); return; }
+  try{
+    toast('PDF 생성 중...');
+    const doc = new jsPDF({orientation:'p',unit:'pt',format:'a4'});
+    const builders = [buildAppHtml, buildTotalHtml, buildFeeHtml];
+    for(let i=0;i<builders.length;i++){
+      const c = await renderToCanvas(builders[i]());
+      addCanvasAsPages(doc, c, i===0);
+    }
+    const first = sites[0]||{name:'작업'};
+    const label = (first.name||'작업') + (sites.length>1?` 외 ${sites.length-1}건`:'');
+    download(doc.output('arraybuffer'), `도로점용허가서류(${label.replace(/[\\/:*?"<>|]/g,'')}).pdf`);
+    toast('PDF 저장 완료');
+  }catch(e){ toast('실패: '+e.message); }
+}
+$('btnPdfApp').addEventListener('click', ()=>savePdf(buildAppHtml, '도로점용허가신청서_작업.pdf'));
+$('btnPdfTotal').addEventListener('click', ()=>savePdf(buildTotalHtml, '도로굴착총괄표_작업.pdf'));
+$('btnPdfFee').addEventListener('click', ()=>savePdf(buildFeeHtml, '굴착허가점용료_작업.pdf'));
+$('btnPdfAll').addEventListener('click', saveMergedPdf);
+</script>
+</body>
+</html>

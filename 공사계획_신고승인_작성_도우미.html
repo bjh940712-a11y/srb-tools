@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="fontkit.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore-compat.js"></script>
@@ -685,34 +686,32 @@ $('btnGenApp').addEventListener('click', async ()=>{
 });
 
 /* ================= 7. 공사계획서 + 공정표 + 시공자선정신고서 =================
-   실제로 사용하시던 2.공사계획서.doc 원본을 그대로 PDF화한 template_plan.pdf(3페이지)를
-   배경으로 쓰고, 작성해야 하는 곳에만 값을 그려 넣는다. 좌표는 원본 doc 파일의 문단/표
-   좌표를 pdfjs로 직접 추출해서 얻은 실측값이다(라벨/표/서명란은 원본과 100% 동일하게 유지). */
+   실제로 사용하시던 2.공사계획서.doc 원본을 그대로 PDF화하고, 작성해야 하는 곳에는
+   실제 PDF 입력필드(AcroForm)를 심어둔 template_plan.pdf(3페이지)를 사용한다.
+   좌표를 캔버스에 "그려 넣는" 방식이 아니라, 필드에 값을 "타이핑"해 채운 뒤 flatten한다.
+   (페이지2 공정표의 주황색 표시만 도형이라 pdf-lib로 직접 그린다.) */
 const PLAN_TEMPLATE_FILE = 'template_plan.pdf';
-const PLAN_P1 = {
-  valueX:88,
-  loc:{y:574.7}, purposeLines:[{y:517.4},{y:502.4}],
-  period:{y:460.1}, pressure:{y:402.8},
-  // 배관내역 표: 열 중심 x좌표(본관 관경/길이, 공급관 관경/길이, 계 관경/길이), 행 y좌표(신고대상 4행, 계, 비신고대상 1행)
-  colCx:[161.4, 231.1, 300.8, 370.6, 440.3, 510.0],
-  reportRowY:[301.3, 278.6, 255.9, 233.2], sumRowY:210.5, nonreportRowY:187.8,
-  nReport:4, nNonreport:1,
-  cost1:{x:222,y:97.2}, cost2:{x:240,y:71.9}, cost3:{x:222,y:46.6}
-};
+const PLAN_FONT_FILE = 'NotoSansKR-Subset.otf';
 const PLAN_P2 = {
-  dateCx:342, dateY:551.6,
+  dateCx:342, dateY:547,
   segCx:[176, 244, 311, 378, 449],
   // 6개 공정 카테고리(배관공사/터파기및되메우기/비파괴검사/전기방식공사/자체검사뒷정리/시공감리)의 행 중심 y
   catY:[482.6, 432.8, 384.3, 335.9, 287.6, 239.1]
 };
-const PLAN_P3 = {
-  valueX:275,
-  nameY:670.0,
-  fieldYs:[641.2, 610.5, 579.9, 549.2, 518.5, 487.8, 457.2, 426.5], // 상호,대표자,사무소소재지,면허구분,성명,생년월일,주소,자격구분
-  yyX:339, mmX:358, dateY:300.3
-  // 신청인 주소/서라벌도시가스(주)/대표이사/영천시장귀하 문구는 원본 서식에 이미 고정 인쇄되어 있어 덮어쓰지 않는다.
-};
 function fmtDatePeriod(v){ if(!v) return ''; const p=v.split('-'); return `${p[0]}.${p[1]}.${p[2]}`; }
+
+// 필드 폭 안에 들어가도록 텍스트를 최대 2줄로 나눈다(목적란 전용).
+function wrapPurposeText(font, text, size, maxW){
+  if(font.widthOfTextAtSize(text, size) <= maxW) return [text, ''];
+  let line='', lines=[];
+  for(const ch of text){
+    const test = line+ch;
+    if(font.widthOfTextAtSize(test, size) > maxW){ if(line) lines.push(line); line=ch; }
+    else line = test;
+  }
+  if(line) lines.push(line);
+  return [lines[0]||'', lines[1]||''];
+}
 
 async function buildPlanBytes(){
   const loc = $('pLoc').value.trim();
@@ -724,104 +723,91 @@ async function buildPlanBytes(){
   const isMid = document.querySelector('input[name=pressKind]:checked').value === 'mid';
   const pressText = isMid ? '중압관 979 KPa' : '저압관 98.1 KPa';
 
-  const tplBytes = await fetchTemplateBytes(PLAN_TEMPLATE_FILE);
-  const pdf = await pdfjsLib.getDocument({data: tplBytes}).promise;
-  const scale = 3;
-  const canvases = [];
+  const [tplBytes, fontBytes] = await Promise.all([
+    fetchTemplateBytes(PLAN_TEMPLATE_FILE),
+    fetchTemplateBytes(PLAN_FONT_FILE)
+  ]);
 
-  async function renderBaseCanvas(pageNo){
-    const page = await pdf.getPage(pageNo);
-    const viewport = page.getViewport({scale});
-    const pageHeightPt = page.getViewport({scale:1}).height;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(viewport.width); canvas.height = Math.round(viewport.height);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
-    await page.render({canvasContext: ctx, viewport}).promise;
-    const toPx = (x,y) => ({x:x*scale, y:(pageHeightPt-y)*scale});
-    const drawL = (x,y,txt,size)=>{ const p=toPx(x,y); drawTextLeft(ctx, txt, p.x, p.y, size*scale); };
-    const drawC = (cx,y,txt,size,maxWidthPt)=>{
-      const p=toPx(cx,y);
-      fitTextCentered(ctx, txt, p.x, p.y, (maxWidthPt||9999)*scale, size*scale/scale*scale); // startSize already in px
-    };
-    const drawFitL = (x,y,txt,maxWidthPt,size)=>{
-      const p=toPx(x,y);
-      let s=size;
-      ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
-      while(s>6){
-        ctx.font = `${s*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-        if(ctx.measureText(txt).width <= maxWidthPt*scale) break;
-        s -= 0.5;
-      }
-      ctx.fillText(txt, p.x, p.y);
-    };
-    return {canvas, ctx, toPx, drawL, drawC, drawFitL};
-  }
+  const { PDFDocument, rgb } = PDFLib;
+  const pdfDoc = await PDFDocument.load(tplBytes);
+  pdfDoc.registerFontkit(fontkit);
+  const korFont = await pdfDoc.embedFont(fontBytes, {subset:true});
+
+  const form = pdfDoc.getForm();
+  const set = (name, val, size)=>{
+    const f = form.getTextField(name);
+    f.setText(val==null ? '' : String(val));
+    f.setFontSize(size);
+  };
 
   // ---- PAGE 1 : 공사계획서 ----
-  {
-    const {canvas, ctx, toPx, drawL, drawFitL} = await renderBaseCanvas(1);
-    const P = PLAN_P1;
-    drawFitL(P.valueX, P.loc.y, loc, 535-P.valueX-10, 11);
+  set('loc', loc, 11);
+  const [pLine1, pLine2] = wrapPurposeText(korFont, purpose, 10.5, 447-88-10);
+  set('purpose1', pLine1, 10.5);
+  set('purpose2', pLine2, 10.5);
+  set('period', `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, 11);
+  set('pressure', pressText, 11);
 
-    const maxWpx = (535-P.valueX-10)*scale;
-    ctx.font = `${10.5*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-    let lines = [];
-    if(ctx.measureText(purpose).width <= maxWpx){ lines=[purpose]; }
-    else {
-      let line='';
-      for(const ch of purpose){
-        const test=line+ch;
-        if(ctx.measureText(test).width > maxWpx){ if(line) lines.push(line); line=ch; } else line=test;
-      }
-      if(line) lines.push(line);
-      lines = lines.slice(0,2);
-    }
-    drawL(P.valueX, P.purposeLines[0].y, lines[0]||'', 10.5);
-    if(lines[1]) drawL(P.valueX, P.purposeLines[1].y, lines[1], 10.5);
+  const repRows = pipeRows.filter(r=>r.scope==='신고대상' && r.len).slice(0,4);
+  const nonRows = pipeRows.filter(r=>r.scope==='비신고대상' && r.len).slice(0,1);
+  repRows.forEach((r,i)=>{
+    const n = i+1;
+    const isMain = r.kind==='본관';
+    set(`r${n}_mdia`, isMain ? (r.dia||'') : '', 9.5);
+    set(`r${n}_mlen`, isMain ? (r.len?r.len+'M':'') : '', 9.5);
+    set(`r${n}_sdia`, isMain ? '' : (r.dia||''), 9.5);
+    set(`r${n}_slen`, isMain ? '' : (r.len?r.len+'M':''), 9.5);
+    set(`r${n}_tdia`, r.dia||'', 9.5);
+    set(`r${n}_tlen`, r.len?r.len+'M':'', 9.5);
+  });
+  const repSum = pipeGroupSummary('신고대상');
+  if(repSum){
+    set('sum_tdia', repSum.diaLabel, 9.5);
+    set('sum_tlen', repSum.total.toLocaleString()+'M', 9.5);
+  }
+  nonRows.forEach(r=>{
+    const isMain = r.kind==='본관';
+    set('n1_mdia', isMain ? (r.dia||'') : '', 9.5);
+    set('n1_mlen', isMain ? (r.len?r.len+'M':'') : '', 9.5);
+    set('n1_sdia', isMain ? '' : (r.dia||''), 9.5);
+    set('n1_slen', isMain ? '' : (r.len?r.len+'M':''), 9.5);
+    set('n1_tdia', r.dia||'', 9.5);
+    set('n1_tlen', r.len?r.len+'M':'', 9.5);
+  });
 
-    drawL(P.valueX, P.period.y, `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, 11);
-    drawL(P.valueX, P.pressure.y, pressText, 11);
+  set('cost1', fmtWon($('costTotal').value), 10.5);
+  set('cost2', fmtWon($('costUser').value), 10.5);
+  set('cost3', fmtWon($('costCompany').value), 10.5);
 
-    const drawCell = (cx,y,txt,size)=>{
-      const p = toPx(cx,y);
-      ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
-      ctx.font = `${size*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      ctx.fillText(txt, p.x, p.y);
-    };
-    const drawPipeRow = (y, r) => {
-      const isMain = r.kind==='본관';
-      if(isMain){ drawCell(P.colCx[0],y,r.dia||'',9.5); drawCell(P.colCx[1],y,r.len?r.len+'M':'',9.5); }
-      else { drawCell(P.colCx[2],y,r.dia||'',9.5); drawCell(P.colCx[3],y,r.len?r.len+'M':'',9.5); }
-      drawCell(P.colCx[4],y,r.dia||'',9.5); drawCell(P.colCx[5],y,r.len?r.len+'M':'',9.5);
-    };
-    const repRows = pipeRows.filter(r=>r.scope==='신고대상' && r.len).slice(0,P.nReport);
-    const nonRows = pipeRows.filter(r=>r.scope==='비신고대상' && r.len).slice(0,P.nNonreport);
-    repRows.forEach((r,i)=>drawPipeRow(P.reportRowY[i], r));
-    const repSum = pipeGroupSummary('신고대상');
-    if(repSum){
-      drawCell(P.colCx[4], P.sumRowY, repSum.diaLabel, 9.5);
-      drawCell(P.colCx[5], P.sumRowY, repSum.total.toLocaleString()+'M', 9.5);
-    }
-    nonRows.forEach((r,i)=>drawPipeRow(P.nonreportRowY, r));
-
-    drawL(P.cost1.x, P.cost1.y, fmtWon($('costTotal').value), 10.5);
-    drawL(P.cost2.x, P.cost2.y, fmtWon($('costUser').value), 10.5);
-    drawL(P.cost3.x, P.cost3.y, fmtWon($('costCompany').value), 10.5);
-
-    canvases.push(canvas);
+  // ---- PAGE 3 : 시공자 및 시공관리자 선정 신고서 ----
+  set('projname', $('fProjectName').value.trim(), 10.5);
+  const c = currentContractor || {};
+  set('c_name', c.name||'', 10.5);
+  set('c_rep', c.rep||'', 10.5);
+  set('c_addr', c.addr||'', 10.5);
+  set('c_license', c.license||'', 10.5);
+  set('c_mgrname', c.mgrName||'', 10.5);
+  set('c_mgrbirth', c.mgrBirth||'', 10.5);
+  set('c_mgraddr', c.mgrAddr||'', 10.5);
+  set('c_mgrqual', c.mgrQual||'', 10.5);
+  const monthVal = $('fMonth').value;
+  if(monthVal){
+    const [yy,mm] = monthVal.split('-');
+    const yyF = form.getTextField('yy'); yyF.setAlignment(2); set('yy', yy, 10.5);
+    const mmF = form.getTextField('mm'); mmF.setAlignment(2); set('mm', mm, 10.5);
   }
 
-  // ---- PAGE 2 : 공사공정표 ----
+  form.updateFieldAppearances(korFont);
+  form.flatten();
+
+  // ---- PAGE 2 : 공사공정표 (도형/텍스트는 필드가 아니라 직접 그린다) ----
   {
-    const {canvas, ctx, toPx} = await renderBaseCanvas(2);
+    const page = pdfDoc.getPages()[1];
     const P = PLAN_P2;
-    {
-      const p = toPx(P.dateCx, P.dateY);
-      ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
-      ctx.font = `${10*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      ctx.fillText(`${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`, p.x, p.y);
-    }
+    const periodText = `${fmtDatePeriod(start)} ~ ${fmtDatePeriod(end)}`;
+    const tw = korFont.widthOfTextAtSize(periodText, 10);
+    page.drawText(periodText, {x:P.dateCx-tw/2, y:P.dateY, size:10, font:korFont, color:rgb(0,0,0)});
+
     const idxList = activeGanttIdx();
     idxList.forEach(catIdx=>{
       const rowY = P.catY[catIdx];
@@ -829,38 +815,15 @@ async function buildPlanBytes(){
         if(!seg) return;
         const key = catIdx+'_'+si;
         if(ganttOff.has(key)) return;
-        const p = toPx(P.segCx[si], rowY);
-        ctx.fillStyle = '#c15f3c';
-        ctx.fillRect(p.x - 30*scale, p.y - 15*scale, 60*scale, 30*scale);
+        page.drawRectangle({
+          x: P.segCx[si]-30, y: rowY-15, width:60, height:30,
+          color: rgb(0.757,0.373,0.235)
+        });
       });
     });
-    canvases.push(canvas);
   }
 
-  // ---- PAGE 3 : 시공자 및 시공관리자 선정 신고서 ----
-  {
-    const {canvas, ctx, toPx, drawL} = await renderBaseCanvas(3);
-    const P = PLAN_P3;
-    const proj = $('fProjectName').value.trim();
-    drawL(P.valueX, P.nameY, proj, 10.5);
-    const c = currentContractor || {};
-    const vals = [c.name, c.rep, c.addr, c.license, c.mgrName, c.mgrBirth, c.mgrAddr, c.mgrQual];
-    vals.forEach((v,i)=> drawL(P.valueX, P.fieldYs[i], v||'', 10.5));
-    const monthVal = $('fMonth').value;
-    if(monthVal){
-      const [yy,mm] = monthVal.split('-');
-      ctx.textAlign='right'; ctx.textBaseline='alphabetic'; ctx.fillStyle='#000';
-      ctx.font = `${10.5*scale}px "Malgun Gothic","맑은 고딕",sans-serif`;
-      const pyy = toPx(P.yyX, P.dateY), pmm = toPx(P.mmX, P.dateY);
-      ctx.fillText(yy, pyy.x, pyy.y);
-      ctx.fillText(mm, pmm.x, pmm.y);
-    }
-    canvases.push(canvas);
-  }
-
-  const doc = new jsPDF({orientation:'p', unit:'pt', format:'a4'});
-  canvases.forEach((cv,i)=> addCanvasAsPages(doc, cv, i===0));
-  return doc.output('arraybuffer');
+  return pdfDoc.save();
 }
 
 $('btnGenPlan').addEventListener('click', async ()=>{

@@ -1,9 +1,13 @@
+https://raw.githubusercontent.com/bjh940712-a11y/srb-tools/master/%EC%86%8C%EA%B7%9C%EB%AA%A8%ED%8F%AC%EC%9E%A5%EA%B3%B5%EC%82%AC_%EC%A4%80%EA%B3%B5%EB%8F%84%EC%9A%B0%EB%AF%B8.html
+→ https://raw.githubusercontent.com/bjh940712-a11y/srb-tools/master/%EC%86%8C%EA%B7%9C%EB%AA%A8%ED%8F%AC%EC%9E%A5%EA%B3%B5%EC%82%AC_%EC%A4%80%EA%B3%B5%EB%8F%84%EC%9A%B0%EB%AF%B8.html
+Content-Type: text/plain; charset=utf-8
+
 <!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>소규모 포장공사 준공보고 도우미</title>
+<title>공사지원 도우미 - 소규모 포장공사 준공보고 도우미</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -103,12 +107,14 @@
     border:1.5px solid var(--border);color:var(--muted);background:#fff;transition:.15s;}
   .sitenav a:hover{border-color:var(--accent);color:var(--accent-dark);}
   .sitenav a.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .brand{font-size:11.5px;font-weight:800;color:var(--accent);letter-spacing:.5px;margin:0 0 8px;}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="brand">공사지원 도우미</div>
   <div class="sitenav">
-    <a href="index.html">① 시공일지 변환·병합</a>
+    <a href="index.html">① 공사시공일지 도우미</a>
     <a href="소규모배관공사_준공도우미.html">② 소규모 배관공사 준공 도우미</a>
     <a href="소규모포장공사_준공도우미.html" class="on">③ 소규모 포장공사 준공 도우미</a>
     <a href="공사계획_신고승인_작성_도우미.html">④ 공사계획 신고/승인 작성 도우미</a>
@@ -187,9 +193,10 @@
       <div><label>기안근거</label><input type="text" id="doc_basis" placeholder="예: 서라벌-제2026-0261 / 0318 / 0399 호에 의거"></div>
       <div><label>대금지급방법</label><input type="text" id="doc_paymethod" value="공사발주계약 - 대금지급 규정에 의거 현금지급"></div>
       <div><label>준공일자 (공사현황 표 공통값)</label><input type="text" id="doc_donedate" placeholder="예: 26/07/11"></div>
+      <div><label>포장 종류 및 복구방법 (표 공통값)</label><input type="text" id="doc_pavetype" placeholder="예: ASP 폭1.2m 확장복구, 차선"></div>
     </div>
 
-    <div class="hint" style="margin-top:10px;">내역서를 업로드하면 아래 공사건 목록이 자동으로 채워지고, 발주문서를 업로드하면 발주연장·발주금액·기안번호도 자동으로 채워집니다. "포장 종류 및 복구방법"은 내역서의 포장종별(ASP/CON'C)에 따라 공사건별로 각각 기본값이 채워지며, 필요하면 아래에서 직접 추가·수정하세요.</div>
+    <div class="hint" style="margin-top:10px;">내역서를 업로드하면 아래 공사건 목록이 자동으로 채워지고, 발주문서를 업로드하면 발주연장·발주금액·기안번호도 자동으로 채워집니다. 필요하면 아래에서 직접 추가·수정하세요.</div>
     <ul class="rows" id="rowList"></ul>
     <div class="row">
       <button class="btn secondary" id="btnAddRow">+ 공사건 추가</button>
@@ -594,7 +601,7 @@ function pavementDefaultText(raw){
   const norm = (raw||'').toUpperCase().replace(/[^A-Z]/g,'');
   if(!norm) return '';
   if(norm.includes('ASP')) return 'ASP 폭1.2m 확장복구, 차선';
-  if(norm.includes('CONC') || norm==='CON') return "CON'C 폭0.9m 확장복구";
+  if(norm.includes('CONC')) return "CON'C 폭0.9m 확장복구, 차선";
   return (raw||'').trim();
 }
 
@@ -613,15 +620,15 @@ async function loadNaeyeokseo(file){
       payAmt: Math.round(p.amount/1000),
       note: p.note||'',
       abolish: false,
-      // 포장 종류 및 복구방법은 공사건마다 다를 수 있으므로, 내역서의 해당 행 포장종별을 기준으로
-      // 공사건별 기본값을 각각 채운다(공통값 아님).
-      pavetype: pavementDefaultText(p.pavementType),
     }));
 
-    // 준공일자는 표 공통값이라, 비어있을 때만 내역서 기준으로 기본값을 채운다
+    // 준공일자·포장종류및복구방법은 표 공통값이라, 비어있을 때만 내역서 기준으로 기본값을 채운다
     if(!$('doc_donedate').value){
       const ds = naeyeokseoDateStr(parsed[0].dateRaw, fallbackYear);
       if(ds) $('doc_donedate').value = ds;
+    }
+    if(!$('doc_pavetype').value){
+      $('doc_pavetype').value = pavementDefaultText(parsed[0].pavementType);
     }
 
     const totalLen = parsed.reduce((a,p)=>a+p.len,0);
@@ -909,9 +916,9 @@ $('btnMergeJgs').addEventListener('click', async ()=>{
 /* =========================================================
    6. 전자결재 준공보고서 - 공사현황 및 준공내역 (수기 입력 행)
    ========================================================= */
-let rows = []; // {name, orderNo, orderLen, doneLen, orderAmt, adjustAmt, doneAmt, payAmt, note, abolish, pavetype}
+let rows = []; // {name, orderNo, orderLen, doneLen, orderAmt, adjustAmt, doneAmt, payAmt, note, abolish}
 function addRow(prefill){
-  rows.push(Object.assign({name:'',orderNo:'',orderLen:0,doneLen:0,orderAmt:0,adjustAmt:0,doneAmt:0,payAmt:0,note:'',abolish:false,pavetype:''}, prefill||{}));
+  rows.push(Object.assign({name:'',orderNo:'',orderLen:0,doneLen:0,orderAmt:0,adjustAmt:0,doneAmt:0,payAmt:0,note:'',abolish:false}, prefill||{}));
   renderAll();
 }
 $('btnAddRow').addEventListener('click', ()=>addRow());
@@ -932,7 +939,6 @@ function renderRows(){
         <div><label>정산금액(천원)</label><input type="number" data-k="adjustAmt" value="${r.adjustAmt||0}"></div>
         <div><label>준공금액(천원)</label><input type="number" data-k="doneAmt" value="${r.doneAmt||0}"></div>
         <div><label>금회지급액(천원)</label><input type="number" data-k="payAmt" value="${r.payAmt||0}"></div>
-        <div><label>포장 종류 및 복구방법</label><input type="text" data-k="pavetype" value="${r.pavetype||''}" placeholder="예: ASP 폭1.2m 확장복구, 차선"></div>
         <div><label>비고</label><input type="text" data-k="note" value="${r.note||''}"></div>
         <div><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);font-weight:400;">
           <input type="checkbox" data-k="abolish" ${r.abolish?'checked':''} style="width:auto;"> 폐지 공사 (공사명 뒤 "(폐지)" 표시)</label></div>
@@ -991,6 +997,7 @@ function renderDocTbl(){
   const H='background:#e2efda;font-weight:700;', G='background:#e2efda;font-weight:700;';
   const PAY='color:#1155cc;font-weight:700;';
   const donedate = $('doc_donedate').value||'';
+  const pavetype = $('doc_pavetype').value||'';
 
   const spanAt = {};
   rows.forEach((r,idx)=>{
@@ -1013,9 +1020,10 @@ function renderDocTbl(){
       tdDoc(r.doneAmt?fmtThousand(r.doneAmt):'-')+
       tdDoc(r.payAmt?fmtThousand(r.payAmt):'-', PAY);
     if(idx===0){
-      body += tdDoc(donedate||'-','',`rowspan="${rows.length}"`);
+      body += tdDoc(donedate||'-','',`rowspan="${rows.length}"`)+
+        tdDoc(pavetype||'-','',`rowspan="${rows.length}"`);
     }
-    body += tdDoc(r.pavetype||'-','text-align:left;')+tdDoc(r.note||'','text-align:left;')+'</tr>';
+    body += tdDoc(r.note||'','text-align:left;')+'</tr>';
   });
   const sum = docSums();
   const sumRow = '<tr>'+tdDoc('합&nbsp;계',G,'colspan="3"')+
@@ -1048,9 +1056,7 @@ function buildDocTable(){
 
 function buildDocTitle(){
   if(!rows.length) return '';
-  // 공사건 중 하나라도 "폐지 공사"로 체크되어 있으면 제목 앞머리를 "소규모/폐지"로 바꾼다.
-  const prefix = rows.some(r=>r.abolish) ? '소규모/폐지' : '소규모';
-  return `${prefix} 포장공사 준공보고 및 준공금 지급품의 - ${computeDocNameStr()}`;
+  return `소규모 포장공사 준공보고 및 준공금 지급품의 - ${computeDocNameStr()}`;
 }
 
 function buildDocBody(){
@@ -1081,7 +1087,7 @@ function renderDocOutput(){
   $('doc_title').value = buildDocTitle();
   $('docBodyPreview').innerHTML = buildDocBody();
 }
-['doc_basis','doc_paymethod','doc_donedate'].forEach(id=>{
+['doc_basis','doc_paymethod','doc_donedate','doc_pavetype'].forEach(id=>{
   $(id).addEventListener('input', ()=>{ renderDocTbl(); renderDocOutput(); });
 });
 

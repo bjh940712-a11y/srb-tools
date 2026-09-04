@@ -11,6 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root{
     --bg:#f7f7f5; --card:#fff; --border:#e3e1dc; --text:#2b2a27; --muted:#8a8780;
@@ -144,6 +145,7 @@
     <div id="aggTableWrap" style="overflow-x:auto;margin-top:10px;"></div>
     <div class="row" id="aggActions" style="display:none;margin-top:10px;">
       <button class="btn primary" id="btnAggPdf">집계표 PDF 저장</button>
+      <button class="btn accent2" id="btnAggExcel">집계표 엑셀 저장</button>
     </div>
   </div>
 </div>
@@ -867,37 +869,201 @@ async function loadAggregateForSite(){
 }
 $('btnAggLoad').addEventListener('click', loadAggregateForSite);
 
-function renderAggregateTable(siteName, docs){
-  aggData = {siteName, docs};
-  // 항목 목록(행 순서)은 저장된 기록 중 항목 수가 가장 많은 것을 기준으로 삼는다
-  // (엑셀 서식이 중간에 바뀌어 항목이 늘거나 줄어도 표가 깨지지 않도록).
-  const base = docs.reduce((a,b)=> (b.items||[]).length > (a.items||[]).length ? b : a);
-  const itemNames = (base.items||[]).map(it=>it.name);
-  const th = v=>`<th style="border:1px solid #ccc;padding:5px 8px;background:#faf9f7;font-size:11.5px;white-space:nowrap;">${v}</th>`;
-  const td = (v,st)=>`<td style="border:1px solid #ccc;padding:5px 8px;font-size:11.5px;text-align:center;${st||''}">${v}</td>`;
-  let head = th('항목')+th('배점');
-  docs.forEach(d=>{ head += th(d.dateLabel||d.dateStr); });
-  head += th('평균');
-  let rows='';
-  itemNames.forEach(name=>{
+// 회사 표준 "일일 점검사항 평가 집계표" 서식의 고정 항목 순서·구분·배점(안전시공 11개 +
+// 품질 및 현장관리 10개, 총 21개). 매일 업로드하는 엑셀마다 항목명 뒤에 "(top5 신설)"
+// "(품질로 이동)" 같은 주석이 붙어있거나 공백이 달라도, normItemName()으로 정규화해서
+// 이 표준 순서에 맞춰 정렬한다. 표준 목록에 없는 항목은 "기타" 구분으로 맨 아래에 붙는다.
+const CANONICAL_EVAL_ITEMS = [
+  {group:'안전시공', name:'공사안내판 설치 및 신호수 배치', maxScore:3},
+  {group:'안전시공', name:'작업자 교육 및 보호구 착용', maxScore:3},
+  {group:'안전시공', name:'보행자 안전확보', maxScore:5},
+  {group:'안전시공', name:'건설장비 유도원 배치', maxScore:5},
+  {group:'안전시공', name:'굴삭기 안전핀 설치', maxScore:5},
+  {group:'안전시공', name:'건설차량 고임목 설치', maxScore:3},
+  {group:'안전시공', name:'토류벽 설치', maxScore:5},
+  {group:'안전시공', name:'담장지지대', maxScore:3},
+  {group:'안전시공', name:'토사 이격 적치', maxScore:5},
+  {group:'안전시공', name:'현장 사다리 적용', maxScore:3},
+  {group:'안전시공', name:'안전사고', maxScore:4},
+  {group:'품질 및 현장관리', name:'CCTV설치', maxScore:2},
+  {group:'품질 및 현장관리', name:'상하월 시공 및 심도유지', maxScore:3},
+  {group:'품질 및 현장관리', name:'침상재료', maxScore:3},
+  {group:'품질 및 현장관리', name:'지장물 구간 시공', maxScore:3},
+  {group:'품질 및 현장관리', name:'되메우기', maxScore:3},
+  {group:'품질 및 현장관리', name:'자재취급', maxScore:3},
+  {group:'품질 및 현장관리', name:'현장정리정돈상태', maxScore:3},
+  {group:'품질 및 현장관리', name:'물청소 실시_비산먼지 예방', maxScore:3},
+  {group:'품질 및 현장관리', name:'일일 공사종료 후 현장 안전조치', maxScore:3},
+  {group:'품질 및 현장관리', name:'공사지원담당 요청사항', maxScore:5},
+];
+function normItemName(name){
+  return String(name||'')
+    .replace(/\([^)]*\)/g,'')   // "(top5 신설)" "(품질로 이동)" 같은 괄호 주석 제거
+    .replace(/^\d+\.\s*/,'')    // "1. " 같은 번호 매김 제거
+    .replace(/\s+/g,'');        // 공백·줄바꿈 차이 무시
+}
+// docs(날짜별 저장 기록)를 표준 항목 순서에 맞춰 {group, name, maxScore, vals[]} 행 배열로 만든다.
+function buildAggRows(docs){
+  const dayMaps = docs.map(d=>{
+    const m = new Map();
+    (d.items||[]).forEach(it=>{ m.set(normItemName(it.name), it); });
+    return m;
+  });
+  const rows = CANONICAL_EVAL_ITEMS.map(ci=>{
+    const key = normItemName(ci.name);
+    let maxScore = ci.maxScore;
+    const vals = dayMaps.map(m=>{
+      const it = m.get(key);
+      if(it && it.maxScore!=null) maxScore = it.maxScore;
+      return it ? it.score : null;
+    });
+    return {group:ci.group, name:ci.name, maxScore, vals};
+  });
+  const matchedKeys = new Set(CANONICAL_EVAL_ITEMS.map(ci=>normItemName(ci.name)));
+  const extraMap = new Map(); // normKey -> 원본 표기(처음 발견된 것) - 표준목록에 없는 항목
+  docs.forEach(d=>(d.items||[]).forEach(it=>{
+    const key = normItemName(it.name);
+    if(!matchedKeys.has(key) && !extraMap.has(key)) extraMap.set(key, it.name);
+  }));
+  extraMap.forEach((dispName,key)=>{
     let maxScore='-';
-    const rowVals = docs.map(d=>{
-      const it=(d.items||[]).find(x=>x.name===name);
+    const vals = dayMaps.map(m=>{
+      const it = m.get(key);
       if(it && maxScore==='-') maxScore = it.maxScore;
       return it ? it.score : null;
     });
-    const nums = rowVals.filter(v=>v!=null);
-    const avg = nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length) : null;
-    rows += '<tr>'+td(name,'text-align:left;')+td(maxScore);
-    rowVals.forEach(v=>{ rows += td(v==null?'-':v); });
-    rows += td(avg==null?'-':avg.toFixed(2),'font-weight:700;')+'</tr>';
+    rows.push({group:'기타', name:dispName, maxScore, vals});
   });
-  const table = `<table style="border-collapse:collapse;width:100%;">`+
-    `<tr>${head}</tr>${rows}</table>`;
+  return rows;
+}
+
+function renderAggregateTable(siteName, docs){
+  aggData = {siteName, docs};
+  const rows = buildAggRows(docs);
+  const HEAD_BG = '#ddd9c4';
+  const nDay = docs.length;
+  // rowspan(구분/항목/배점/평균은 헤더 두 행에 걸쳐 세로로 합침)과 colspan(점수는 날짜 수만큼
+  // 가로로 합침)이 섞여 있어, 각 헤더 셀을 개별적으로 명시해서 만든다.
+  const hcell = (v,span)=>`<th ${span||''} style="border:1px solid #555;padding:3px 6px;background:${HEAD_BG};font-size:10px;font-weight:700;white-space:nowrap;text-align:center;vertical-align:middle;">${v}</th>`;
+
+  let head = '<tr>'
+    + hcell('구분','rowspan="2"')
+    + hcell('항 목','rowspan="2"')
+    + hcell('배점','rowspan="2"')
+    + hcell('점수', `colspan="${nDay}"`)
+    + hcell('평 균','rowspan="2"')
+    + '</tr><tr>';
+  docs.forEach(d=>{ head += hcell(d.dateLabel||d.dateStr,''); });
+  head += '</tr>';
+
+  let body='';
+  let i=0;
+  while(i<rows.length){
+    const g = rows[i].group;
+    let span=0;
+    while(i+span<rows.length && rows[i+span].group===g) span++;
+    for(let k=0;k<span;k++){
+      const row = rows[i+k];
+      const nums = row.vals.filter(v=>v!=null);
+      const avg = nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length) : null;
+      body += '<tr>';
+      if(k===0) body += `<td rowspan="${span}" style="border:1px solid #999;padding:3px 6px;font-size:10px;text-align:center;font-weight:700;vertical-align:middle;">${g}</td>`;
+      body += `<td style="border:1px solid #999;padding:3px 6px;font-size:10px;text-align:left;">${row.name}</td>`;
+      body += `<td style="border:1px solid #999;padding:3px 6px;font-size:10px;text-align:center;">${row.maxScore}</td>`;
+      row.vals.forEach(v=>{ body += `<td style="border:1px solid #999;padding:3px 6px;font-size:10px;text-align:center;">${v==null?'-':v}</td>`; });
+      body += `<td style="border:1px solid #999;padding:3px 6px;font-size:10px;text-align:center;font-weight:700;">${avg==null?'-':avg.toFixed(1)}</td>`;
+      body += '</tr>';
+    }
+    i += span;
+  }
   $('aggTableWrap').innerHTML =
-    `<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px;">현장명: <b>${siteName}</b> · 집계된 날짜 ${docs.length}건</div>${table}`;
+    `<div style="font-family:'Malgun Gothic','맑은 고딕',sans-serif;background:#fff;padding:6px 2px;">`+
+    `<div style="font-size:15px;font-weight:700;margin-bottom:4px;color:#000;">■ 일일 점검사항 평가 집계표</div>`+
+    `<div style="font-size:11px;margin-bottom:8px;color:#000;">☞ 현장명: <b>${siteName}</b></div>`+
+    `<table style="border-collapse:collapse;">${head}${body}</table></div>`;
   $('aggActions').style.display='flex';
 }
+
+// 집계표를 스타일(음영·테두리·병합)이 그대로 적용된 .xlsx 파일로 저장한다. 화면/PDF에 쓰는
+// buildAggRows()와 완전히 같은 집계 로직을 재사용하므로 PDF와 엑셀의 숫자가 항상 일치한다.
+async function buildAggregateExcel(){
+  if(!aggData){ toast('먼저 집계표를 불러오세요'); return; }
+  try{
+    toast('엑셀 생성 중...');
+    const { siteName, docs } = aggData;
+    const rows = buildAggRows(docs);
+    const nDay = docs.length;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('집계표');
+
+    ws.getCell(1,1).value = '■ 일일 점검사항 평가 집계표';
+    ws.getCell(1,1).font = { bold:true, size:13 };
+    ws.mergeCells(1,1,1,3+nDay+1);
+
+    ws.getCell(2,1).value = `☞ 현장명: ${siteName}`;
+    ws.getCell(2,1).font = { bold:true, size:10 };
+    ws.mergeCells(2,1,2,3+nDay+1);
+
+    const HEAD_ROW1=3, HEAD_ROW2=4;
+    const headerFill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFDDD9C4'} };
+    const thin = { style:'thin', color:{argb:'FF555555'} };
+    const border = { top:thin, left:thin, bottom:thin, right:thin };
+    function setHeaderCell(r,c,text){
+      const cell = ws.getCell(r,c);
+      cell.value = text;
+      cell.font = { bold:true, size:9 };
+      cell.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
+      cell.fill = headerFill;
+      cell.border = border;
+      return cell;
+    }
+    setHeaderCell(HEAD_ROW1,1,'구분'); ws.mergeCells(HEAD_ROW1,1,HEAD_ROW2,1);
+    setHeaderCell(HEAD_ROW1,2,'항 목'); ws.mergeCells(HEAD_ROW1,2,HEAD_ROW2,2);
+    setHeaderCell(HEAD_ROW1,3,'배점'); ws.mergeCells(HEAD_ROW1,3,HEAD_ROW2,3);
+    setHeaderCell(HEAD_ROW1,4,'점수'); ws.mergeCells(HEAD_ROW1,4,HEAD_ROW1,3+nDay);
+    setHeaderCell(HEAD_ROW1,4+nDay,'평 균'); ws.mergeCells(HEAD_ROW1,4+nDay,HEAD_ROW2,4+nDay);
+    docs.forEach((d,idx)=>{ setHeaderCell(HEAD_ROW2,4+idx, d.dateLabel||d.dateStr); });
+
+    let r = HEAD_ROW2+1, i=0;
+    while(i<rows.length){
+      const g = rows[i].group;
+      let span=0;
+      while(i+span<rows.length && rows[i+span].group===g) span++;
+      for(let k=0;k<span;k++){
+        const row = rows[i+k];
+        const nums = row.vals.filter(v=>v!=null);
+        const avg = nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length) : null;
+        if(k===0){
+          const gc = ws.getCell(r,1);
+          gc.value = g; gc.font={bold:true,size:9}; gc.alignment={horizontal:'center',vertical:'middle'}; gc.border=border;
+          if(span>1) ws.mergeCells(r,1,r+span-1,1);
+        }
+        const nc = ws.getCell(r,2); nc.value=row.name; nc.font={size:9}; nc.alignment={horizontal:'left',vertical:'middle'}; nc.border=border;
+        const mc = ws.getCell(r,3); mc.value=row.maxScore; mc.font={size:9}; mc.alignment={horizontal:'center',vertical:'middle'}; mc.border=border;
+        row.vals.forEach((v,idx)=>{
+          const c = ws.getCell(r,4+idx); c.value = v==null?'-':v; c.font={size:9}; c.alignment={horizontal:'center',vertical:'middle'}; c.border=border;
+        });
+        const ac = ws.getCell(r,4+nDay); ac.value = avg==null?'-':Number(avg.toFixed(1)); ac.font={bold:true,size:9}; ac.alignment={horizontal:'center',vertical:'middle'}; ac.border=border;
+        r++;
+      }
+      i += span;
+    }
+    ws.getColumn(1).width = 12;
+    ws.getColumn(2).width = 26;
+    ws.getColumn(3).width = 7;
+    for(let c=4;c<4+nDay;c++) ws.getColumn(c).width = 8;
+    ws.getColumn(4+nDay).width = 8;
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`집계표(${siteName}).xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    toast('엑셀 저장 완료');
+  }catch(e){ toast('엑셀 생성 실패: '+e.message); }
+}
+$('btnAggExcel').addEventListener('click', buildAggregateExcel);
 
 // 임의의 DOM 요소를 캔버스로 캡처해 PDF로 저장한다(가로/세로 방향을 선택할 수 있도록 별도 구현;
 // 기존 addCanvasAsPages()는 세로 A4 크기가 고정값으로 박혀 있어 가로 방향에는 쓸 수 없다).

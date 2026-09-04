@@ -937,6 +937,206 @@ function buildAggRows(docs){
   return rows;
 }
 
+const EVAL_REPORT_TEMPLATE = {
+  '안전시공': [
+    {label:'1. 공사안내판\n   설치 및\n   신호수 배치', criteria:[['양호:안내판 설치, 교통신호수 배치 적합',3], ['보통:안내판 설치,교통신호수 배치 부분 적합',1], ['불량:안내판 미설치, 교통신호수 미배치',0]], maxScore:3, canonicalIdx:0},
+    {label:'2. 작업자 교육\n   및 보호구착용', criteria:[['양호:착공전 안전교육 실시, 보호구 착용 양호',3], ['보통:안전교육, 보호구 착용 부분 적합',1], ['불량:안전교육 미실시, 보호구 미 착용',0]], maxScore:3, canonicalIdx:1},
+    {label:'3. 보행자\n   안전확보', criteria:[['양호:보행자 통행로 설치 및 관리',5], ['보통:보행자 통행로 설치 미흡',3], ['불량:통행로 미 설치',0]], maxScore:5, canonicalIdx:2},
+    {label:'4. 건설장비\n   유도원 배치', criteria:[['양호:건설장비 유도원 배치 및 업무수행 적합',5], ['보통:유도원 배치 업무수행 부적합',3], ['불량:유도원 미 배치',0]], maxScore:5, canonicalIdx:3},
+    {label:'5. 굴삭기 안전핀\n   설치', criteria:[['양호:굴삭기 안전핀 또는 안전장치 설치 적합 ',5], ['보통:안전핀 또는 안전장치 설치 부분 적합 ',3], ['불량:안전핀 미설치',0]], maxScore:5, canonicalIdx:4},
+    {label:'6. 건설차량\n   고임목 설치', criteria:[['양호:건설차량 정지시 마다 고임목 설치 적합',3], ['보통:고임목 간헐적 설치',1], ['불량:고임목 미 설치',0]], maxScore:3, canonicalIdx:5},
+    {label:'7. 토류벽 설치', criteria:[['양호:기준심도 이상 구간 토류벽 설치 양호',5], ['보통:기준심도 이상 구간 간헐적 설치',3], ['불량:토류벽 미 설치로 불안전한 시공',0]], maxScore:5, canonicalIdx:6},
+    {label:'8. 담장지지대\n(top5 신설)', criteria:[['양호:담장지지대 설치기준 적합',3], ['보통:담장지지대 설치기준 부분적합',1], ['불량:담장지지대 설치기준 미준수',0]], maxScore:3, canonicalIdx:7},
+    {label:'9. 토사 이격적치(top5 신설)', criteria:[['양호: 토사 이격 적치기준 적합',5], ['보통: 토사 이격 적치기준 부분적합',3], ['불량: 토사 적치기준 미준수',0]], maxScore:5, canonicalIdx:8},
+    {label:'10.현장 사다리\n비치(신설)', criteria:[['양호: 트리거 사다리 사용 또는 2인1조 적합',3], ['보통: 트리거 사다리 사용 또는 2인1조 부분적합',1], ['불량: 트리거 사다리 미사용 또는 2인1조 미시행',0]], maxScore:3, canonicalIdx:9},
+    {label:'11. 안전사고', criteria:[['양호:사고없음',5], ['보통:치료 또는 물적배상 없는 경미한사고',0], ['불량:인적 또는 물적피해 사고 발생',-5]], maxScore:5, canonicalIdx:10},
+  ],
+  '품질시공': [
+    {label:'1. CCTV설치', criteria:[['양호:CCTV설치 및 관리상태 적합',2], ['보통:CCTV설치 부적합 및 관리상태 미흡',1], ['불량:CCTV미설치 및 관리 부재',0]], maxScore:2, canonicalIdx:11},
+    {label:'2. 상하월 시공\n   및 심도유지', criteria:[['양호:심도유지 또는 미 유지 구간 사전 협의',3], ['보통:심도 미유지 구간 공사감독 미협의 시공',1], ['불량:심도 미유지 시공 또는 보호조치 미시공',0]], maxScore:3, canonicalIdx:12},
+    {label:'3. 침상재료', criteria:[['양호:법적기준 준수 또는 재료 변경시 사전 협의',3], ['보통:기준에 적합하나 비산먼지 발생 재료 사용',2], ['불량:협의없이 재료 변경 또는 기준미달 사용',1]], maxScore:3, canonicalIdx:13},
+    {label:'4. 지장물 구간\n   시공', criteria:[['양호:보호조치 및 타시설물 원상복구 상태 양호',3], ['보통:보호조치 또는 타시설물 복구상태 미흡',2], ['불량:미 보호조치 또는 타시설물 복구 불량',0]], maxScore:3, canonicalIdx:14},
+    {label:'5. 되메우기', criteria:[['양호:적합 되메움재 사용 및 층다짐 2회이상 실시',3], ['보통:되메움재 부적합 또는 층다짐 2회 미만 실시',2], ['불량:되메움재 부적합 및 층다짐 미실시',0]], maxScore:3, canonicalIdx:15},
+    {label:'6.시설물 설치', criteria:[['양호:밸브,T/B 설치장소 및 설치상태 적합',2], ['보통:시설물 설치 장소 또는 설치상태 미흡',1], ['불량:지면과 단차발생등 설치상태 불량',0]], maxScore:2, canonicalIdx:null},
+    {label:'7. 피그볼 및\n   후레싱 작업', criteria:[['양호:2회이상 실시 및 관내 이물질 완벽 제거 ',4], ['보통:2회미만 실시 또는 이물질 제거 미흡',2], ['불량:작업 미실시 ',0]], maxScore:4, canonicalIdx:null},
+    {label:'8. 용접시공', criteria:[['양호:불량율 1%미만',2], ['보통:불량율 3%미만',1], ['불량:미등록 용접사 시공 또는 불량율 5%이상',0]], maxScore:2, canonicalIdx:null},
+    {label:'9. 융착시공', criteria:[['양호:110A이상 융착방법 협의 및 불량율 없음',2], ['보통:불량율 없으나 융착방법 미 협의',1], ['불량:미등록 융착사 시공 또는 작업불량 발생',0]], maxScore:2, canonicalIdx:null},
+    {label:'10. 방식시공', criteria:[['양호:용도에 적합한 자재사용 및 시공양호',2], ['보통:방식자재 용도 구분 사용 미흡',1], ['불량:표면청소,가열, 및 시공불량 ',0]], maxScore:2, canonicalIdx:null},
+    {label:'11. 자재취급', criteria:[['양호:고임목, 덮개 설치등 야적상태 양호',3], ['보통:고임목, 야적상태 미흡',1], ['불량:취급 부주의 피복손상, 변형 발생',0]], maxScore:3, canonicalIdx:16},
+  ],
+  '현장관리': [
+    {label:'1. 착공전\n   주민홍보', criteria:[['양호:공사안내 홍보물 배포 및 현수막설치',2], ['보통:공사안내 홍보 미흡',1], ['불량:홍보없이 착공으로 주민불편 민원 발생',0]], maxScore:2, canonicalIdx:null},
+    {label:'2. 각종 신고사항\n   준수', criteria:[['양호:사전 신고사항 준수 및 타 시설물 협의',2], ['보통:신고사항 누락, 타 시설물 협의 미흡',1], ['불량:미 신고, 미 협의 또는 이로 인한 민원발생',0]], maxScore:2, canonicalIdx:null},
+    {label:'3. 적정한\n   작업인력 투입', criteria:[['양호:적정한 작업인력 투입으로 양질의 시공',2], ['보통:인력부족에 따른 작업자 피로도 가중',1], ['불량:인력부족으로 공기지연 또는 안전사고 발생',-2]], maxScore:2, canonicalIdx:null},
+    {label:'4. 현장\n   정리정돈 상태', criteria:[['양호:작업공구,장비의 현장 정리정돈 양호',2], ['보통:장비,공구의 정리정돈 상태 미흡',1], ['불량:정돈상태 불량으로 작업자 안전사고 발생',0]], maxScore:2, canonicalIdx:17},
+    {label:'5. 물청소 실시\n   비산먼지 예방', criteria:[['양호:비산먼지 고려한 골재 사용 및 살수작업',3], ['보통:비산먼지 골재 사용 또는 살수작업 미실시',2], ['불량:비산먼지 관련 민원발생',0]], maxScore:3, canonicalIdx:18},
+    {label:'6. 잔토,폐기물\n   처리', criteria:[['양호:일일 공사종료후 처리기준에 적법하게 처리',3], ['보통:처리지연 또는 처리기준에 미흡',2], ['불량:처리불량에 따른 민원발생',0]], maxScore:3, canonicalIdx:null},
+    {label:'7. 일 작업시간\n     준수', criteria:[['양호:착공 및 일몰 전 작업시간 준수',2], ['보통:특수구간외 야간작업등 작업시간 미 준수',1], ['불량:작업시간 미 준수로 주민불편 민원발생',0]], maxScore:2, canonicalIdx:null},
+    {label:'8. 일일 공사종료\n   후 현장 안전\n   조치', criteria:[['양호:뒷 정리양호, 안전조치로 야간등, 휀스설치',3], ['보통:뒷 정리 또는 안전조치 미흡',2], ['불량:정리 및 안전조치 불량',0]], maxScore:3, canonicalIdx:19},
+    {label:'9. 민원 대응', criteria:[['양호:접수된 민원의 신속한 처리',2], ['보통:처리지연으로 동일민원 중복 접수',1], ['불량:관공서 또는 언론으로 민원 확대  ',-2]], maxScore:2, canonicalIdx:null},
+    {label:'10. 공사지원담당\n  요청사항,\n사전협의', criteria:[['양호:사전협의 및 요청사항 신속처리',5], ['보통:사전협의 미흡 또는 요청사항 지연처리',1], ['불량:협의 미 이행 또는 요청사항 불이행',0]], maxScore:5, canonicalIdx:20},
+    {label:'기타의견', criteria:[], maxScore:null, canonicalIdx:null,isText:true},
+  ],
+};
+// 열 번호(1=A)를 엑셀 열 문자(A, B, ..., Z, AA, ...)로 변환.
+function colLetter(n){
+  let s='';
+  while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); }
+  return s;
+}
+
+// "공사구간별 시공평가서" 두번째 시트를 같은 워크북에 추가한다. 원본 엑셀(공사시공일지-시공일지
+// 양식)의 수식 구조를 분석해 파악한 결과, 안전시공 11개 항목은 전부, 품질시공 11개 중 6개,
+// 현장관리 11개 중 4개(총 21개) 항목의 "점수"가 "집계표" 시트의 평균(Z)열 값을 그대로 참조하는
+// 실제 수식으로 연결되어 있었다(예: ='집계표'!Z6). 나머지 11개 항목(품질시공 5개+현장관리 5개,
+// 최종 준공검사 때만 확인 가능한 항목들)과 "기타의견"은 원본에도 매일 누적되는 데이터가 없어
+// 수기 입력 칸으로 비워둔다. EVAL_REPORT_TEMPLATE의 canonicalIdx가 그 연결 정보다
+// (CANONICAL_EVAL_ITEMS의 인덱스, "집계표" 시트에서 항목 데이터 행 = 5+canonicalIdx).
+function addEvalReportSheet(wb, siteName, docs, nDay){
+  const ws = wb.addWorksheet('공사구간별 시공평가서');
+  const thin = { style:'thin', color:{argb:'FF555555'} };
+  const border = { top:thin, left:thin, bottom:thin, right:thin };
+  const avgCol = colLetter(4+nDay); // "집계표" 시트에서 평균 열
+  const AGG_ROW0 = 5; // "집계표" 시트에서 표준 21개 항목의 첫 데이터 행(HEAD_ROW2+1)
+
+  const BLOCK = { '안전시공':{item:1,crit:2,pt:3,score:4}, '품질시공':{item:6,crit:7,pt:8,score:9}, '현장관리':{item:11,crit:12,pt:13,score:14} };
+  const GROUPS = ['안전시공','품질시공','현장관리'];
+
+  function cell(r,c){ return ws.getCell(r,c); }
+  function setCell(r,c,val,opt){
+    const cl = cell(r,c);
+    cl.value = val;
+    cl.border = border;
+    cl.alignment = Object.assign({horizontal:'center', vertical:'middle', wrapText:true}, (opt&&opt.align)||{});
+    cl.font = Object.assign({size:9}, (opt&&opt.font)||{});
+    if(opt&&opt.fill) cl.fill = { type:'pattern', pattern:'solid', fgColor:{argb:opt.fill} };
+    return cl;
+  }
+
+  // 제목
+  setCell(1,1,'공사구간별 시공평가서', {font:{bold:true,size:14}, align:{horizontal:'center'}});
+  ws.mergeCells(1,1,1,14);
+  ws.getRow(1).height = 22;
+  setCell(2,1,'*평가대상 : 안전시공, 품질시공, 현장관리', {font:{size:9,italic:true}, align:{horizontal:'left'}});
+  ws.mergeCells(2,1,2,14);
+  ws.getRow(2).border = undefined;
+
+  // 공사정보
+  const dateSorted = docs.slice().sort((a,b)=> a.dateStr<b.dateStr?-1:a.dateStr>b.dateStr?1:0);
+  const period = dateSorted.length ? `${dateSorted[0].dateLabel||dateSorted[0].dateStr} ~ ${dateSorted[dateSorted.length-1].dateLabel||dateSorted[dateSorted.length-1].dateStr}` : '';
+  let supName = '';
+  for(let k=dateSorted.length-1;k>=0;k--){ if(dateSorted[k].supName){ supName = dateSorted[k].supName; break; } }
+
+  const infoRow = 4;
+  const HBG='FFDDD9C4';
+  setCell(infoRow,1,'공사명',{font:{bold:true},fill:HBG}); ws.mergeCells(infoRow,1,infoRow,1);
+  setCell(infoRow,2,siteName,{align:{horizontal:'left'}}); ws.mergeCells(infoRow,2,infoRow,4);
+  setCell(infoRow,6,'공사기간',{font:{bold:true},fill:HBG}); ws.mergeCells(infoRow,6,infoRow,6);
+  setCell(infoRow,7,period,{align:{horizontal:'left'}}); ws.mergeCells(infoRow,7,infoRow,9);
+  setCell(infoRow,11,'공사지원',{font:{bold:true},fill:HBG}); ws.mergeCells(infoRow,11,infoRow,11);
+  setCell(infoRow,12,supName,{align:{horizontal:'left'}}); ws.mergeCells(infoRow,12,infoRow,14);
+
+  // 요약표 (구분/점수/배점/백분율/등급) - 원본의 AJ/AL열 수식(각 구분 배점 소계를 44/29/27로 나눠
+  // 백분율 산출, 90/70 기준 A/B/C 등급 판정)을 그대로 재현. 단, 원본 파일 자체가 안전시공은
+  // 배점합계 45인데 나누기는 44, 현장관리는 배점합계 26인데 나누기는 27로 되어있는 사소한
+  // 불일치가 있어(원본 그대로 유지) 백분율 열은 소계 셀을 참조하지 않고 그 고정값을 그대로 썼다.
+  const SUM_ROW = 46; // 항목표 소계 행(아래에서 계산)
+  const sumCellFor = { '안전시공':'D'+SUM_ROW, '품질시공':'I'+SUM_ROW, '현장관리':'N'+SUM_ROW };
+  const ptCellFor  = { '안전시공':'C'+SUM_ROW, '품질시공':'H'+SUM_ROW, '현장관리':'M'+SUM_ROW };
+  const PCT_DIVISOR = { '안전시공':44, '품질시공':29, '현장관리':27 }; // 원본 수식의 고정 분모(그대로 재현)
+
+  const sumHeadRow = 6;
+  ['구분','점수','배점','백분율','등급'].forEach((h,idx)=>{
+    setCell(sumHeadRow,1+idx,h,{font:{bold:true},fill:HBG});
+  });
+  GROUPS.forEach((g,gi)=>{
+    const r = sumHeadRow+1+gi;
+    setCell(r,1,g,{font:{bold:true},align:{horizontal:'center'}});
+    setCell(r,2,{formula:sumCellFor[g]});
+    setCell(r,3,{formula:ptCellFor[g]});
+    setCell(r,4,{formula:`B${r}/${PCT_DIVISOR[g]}*100`});
+    setCell(r,5,{formula:`IF(D${r}>=90,"A",IF(D${r}>=70,"B","C"))`});
+  });
+  const totalRow = sumHeadRow+1+GROUPS.length;
+  setCell(totalRow,1,'합계',{font:{bold:true},align:{horizontal:'center'},fill:HBG});
+  setCell(totalRow,2,{formula:`SUM(B${sumHeadRow+1}:B${sumHeadRow+GROUPS.length})`});
+  setCell(totalRow,3,{formula:`SUM(C${sumHeadRow+1}:C${sumHeadRow+GROUPS.length})`});
+  setCell(totalRow,4,{formula:`B${totalRow}/C${totalRow}*100`});
+  setCell(totalRow,5,{formula:`IF(D${totalRow}>=90,"A",IF(D${totalRow}>=70,"B","C"))`});
+
+  // 항목표 헤더
+  const TBL_HEAD = 12;
+  GROUPS.forEach(g=>{
+    const b = BLOCK[g];
+    setCell(TBL_HEAD,b.item,'항 목',{font:{bold:true},fill:HBG});
+    setCell(TBL_HEAD,b.crit,'판정기준',{font:{bold:true},fill:HBG});
+    setCell(TBL_HEAD,b.pt,'배점',{font:{bold:true},fill:HBG});
+    setCell(TBL_HEAD,b.score,'점수',{font:{bold:true},fill:HBG});
+  });
+  // 여백열(5,10번째 열) 병합 - 요약표(6~10행)가 A~E열을 쓰므로 그 구간은 건드리지 않는다.
+  ws.mergeCells(TBL_HEAD,5,SUM_ROW,5);
+  ws.mergeCells(TBL_HEAD,10,SUM_ROW,10);
+
+  // 항목 행 (11개 항목 x 3줄)
+  const ITEM_START = TBL_HEAD+1;
+  GROUPS.forEach(g=>{
+    const b = BLOCK[g];
+    const items = EVAL_REPORT_TEMPLATE[g];
+    items.forEach((it,i)=>{
+      const r0 = ITEM_START + i*3;
+      setCell(r0,b.item,it.label,{align:{horizontal:'left'}});
+      ws.mergeCells(r0,b.item,r0+2,b.item);
+      if(it.isText){
+        setCell(r0,b.crit,'',{align:{horizontal:'left'}});
+        ws.mergeCells(r0,b.crit,r0+2,b.crit);
+        setCell(r0,b.pt,'',{});
+        ws.mergeCells(r0,b.pt,r0+2,b.pt);
+      } else {
+        it.criteria.forEach((cr,ci)=>{
+          setCell(r0+ci,b.crit,cr[0],{align:{horizontal:'left',wrapText:true},font:{size:8}});
+          setCell(r0+ci,b.pt,cr[1],{});
+        });
+      }
+      let scoreVal = undefined;
+      if(it.canonicalIdx!=null){
+        scoreVal = { formula: `'집계표'!${avgCol}${AGG_ROW0+it.canonicalIdx}` };
+      }
+      const sc = setCell(r0,b.score,scoreVal,{font:{bold:true}});
+      ws.mergeCells(r0,b.score,r0+2,b.score);
+    });
+  });
+
+  // 소계 행
+  GROUPS.forEach(g=>{
+    const b = BLOCK[g];
+    const items = EVAL_REPORT_TEMPLATE[g];
+    const rows = items.map((it,i)=> ITEM_START + i*3);
+    setCell(SUM_ROW,b.item,'소  계',{font:{bold:true},fill:HBG});
+    ws.mergeCells(SUM_ROW,b.item,SUM_ROW,b.crit);
+    setCell(SUM_ROW,b.pt,{formula: rows.map(r=>`${colLetter(b.pt)}${r}`).join('+')},{font:{bold:true},fill:HBG});
+    setCell(SUM_ROW,b.score,{formula: rows.map(r=>`${colLetter(b.score)}${r}`).join('+')},{font:{bold:true},fill:HBG});
+  });
+
+  // 종합의견
+  const OPIN_ROW = SUM_ROW+2;
+  setCell(OPIN_ROW,1,'종합의견',{font:{bold:true},fill:HBG});
+  ws.mergeCells(OPIN_ROW,1,OPIN_ROW,1);
+  setCell(OPIN_ROW,2,'',{align:{horizontal:'left'}});
+  ws.mergeCells(OPIN_ROW,2,OPIN_ROW,14);
+  ws.getRow(OPIN_ROW).height = 40;
+
+  // 열 너비
+  GROUPS.forEach(g=>{
+    const b = BLOCK[g];
+    ws.getColumn(b.item).width = 16;
+    ws.getColumn(b.crit).width = 30;
+    ws.getColumn(b.pt).width = 6;
+    ws.getColumn(b.score).width = 7;
+  });
+  ws.getColumn(5).width = 2;
+  ws.getColumn(10).width = 2;
+}
+
 function renderAggregateTable(siteName, docs){
   aggData = {siteName, docs};
   const rows = buildAggRows(docs);
@@ -1054,13 +1254,18 @@ async function buildAggregateExcel(){
     for(let c=4;c<4+nDay;c++) ws.getColumn(c).width = 8;
     ws.getColumn(4+nDay).width = 8;
 
+    // "공사구간별 시공평가서" 시트를 같은 워크북에 추가한다. 원본 엑셀의 수식 구조를 분석한 결과,
+    // 이 시트의 21개 항목 점수는 "집계표" 시트의 평균값을 그대로 참조하는 실제 수식으로 연결돼
+    // 있었으므로, 여기서도 방금 만든 집계표 시트를 실제 수식으로 참조하게 만든다(값 복사가 아님).
+    addEvalReportSheet(wb, siteName, docs, nDay);
+
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=`집계표(${siteName}).xlsx`;
+    const a = document.createElement('a'); a.href=url; a.download=`시공평가_${siteName}.xlsx`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 5000);
-    toast('엑셀 저장 완료');
+    toast('엑셀 저장 완료 (집계표 + 공사구간별 시공평가서)');
   }catch(e){ toast('엑셀 생성 실패: '+e.message); }
 }
 $('btnAggExcel').addEventListener('click', buildAggregateExcel);

@@ -113,7 +113,7 @@
       <button class="btn secondary" id="btnOnlyPdf">시공일지만 PDF 저장</button>
       <button class="btn primary" id="btnMerge">시공일지 + PDF 병합 저장</button>
     </div>
-    <div class="hint">파일명 옆 콤보박스에서 파일별로 "원본유지 / 압축"을 선택할 수 있습니다. 압축은 PDF 각 페이지를 이미지로 재인코딩해 용량을 줄이지만 텍스트 선택·검색은 안 됩니다(시공일지 변환본은 원래 용량이 작아 항상 원본 화질로 유지됩니다). 사진대지·스캔 도면류는 압축을, 텍스트 위주 문서는 원본유지를 권장합니다.</div>
+    <div class="hint">파일명 옆 첫 번째 콤보박스에서 파일별로 "원본유지 / 압축"을, 두 번째 콤보박스에서 "원본크기 / A4로 조정 / A3로 조정"을 선택할 수 있습니다. 압축은 PDF 각 페이지를 이미지로 재인코딩해 용량을 줄이지만 텍스트 선택·검색은 안 됩니다(시공일지 변환본은 원래 용량이 작아 항상 원본 화질·크기로 유지됩니다). 페이지 크기 조정은 원본 페이지를 비율 유지한 채 선택한 용지 크기 가운데에 맞춰 넣습니다(세로/가로 방향은 원본을 따라갑니다). 사진대지·스캔 도면류는 압축을, 텍스트 위주 문서는 원본유지를 권장합니다.</div>
     <div class="log" id="log"></div>
   </div>
 
@@ -161,9 +161,9 @@ function bindDrop(dropId, inputId, handler){
 }
 bindDrop('xlsDrop','xlsInput',files=>{ if(files[0]) loadExcel(files[0]); });
 bindDrop('pdfDrop','pdfInput',files=>{
-  // 파일마다 압축 여부를 개별 선택할 수 있도록 File 객체와 함께 mode('keep'|'compress')를 저장한다.
-  // 기본값은 원본유지.
-  Array.from(files).forEach(f=>{ if(f.name.toLowerCase().endsWith('.pdf')) pdfFiles.push({file:f, mode:'keep'}); });
+  // 파일마다 압축 여부/페이지 크기를 개별 선택할 수 있도록 File 객체와 함께
+  // mode('keep'|'compress'), pageSize('orig'|'a4'|'a3')를 저장한다. 기본값은 원본유지·원본크기.
+  Array.from(files).forEach(f=>{ if(f.name.toLowerCase().endsWith('.pdf')) pdfFiles.push({file:f, mode:'keep', pageSize:'orig'}); });
   renderPdfList();
 });
 
@@ -370,12 +370,18 @@ function renderPdfList(){
   pdfFiles.forEach((pf,idx)=>{
     const li=document.createElement('li');
     li.innerHTML=`<span class="tag">${idx+2}</span><span class="name">${pf.file.name}</span>
-      <select data-idx="${idx}">
+      <select data-role="mode">
         <option value="keep" ${pf.mode==='keep'?'selected':''}>원본유지</option>
         <option value="compress" ${pf.mode==='compress'?'selected':''}>압축</option>
       </select>
+      <select data-role="pagesize">
+        <option value="orig" ${(!pf.pageSize||pf.pageSize==='orig')?'selected':''}>원본크기</option>
+        <option value="a4" ${pf.pageSize==='a4'?'selected':''}>A4로 조정</option>
+        <option value="a3" ${pf.pageSize==='a3'?'selected':''}>A3로 조정</option>
+      </select>
       <button data-a="up">▲</button><button data-a="down">▼</button><button data-a="del">✕</button>`;
-    li.querySelector('select').addEventListener('change',e=>{ pf.mode = e.target.value; });
+    li.querySelector('[data-role="mode"]').addEventListener('change',e=>{ pf.mode = e.target.value; });
+    li.querySelector('[data-role="pagesize"]').addEventListener('change',e=>{ pf.pageSize = e.target.value; });
     li.querySelector('[data-a=up]').onclick=()=>{ if(idx>0){[pdfFiles[idx-1],pdfFiles[idx]]=[pdfFiles[idx],pdfFiles[idx-1]];renderPdfList();} };
     li.querySelector('[data-a=down]').onclick=()=>{ if(idx<pdfFiles.length-1){[pdfFiles[idx+1],pdfFiles[idx]]=[pdfFiles[idx],pdfFiles[idx+1]];renderPdfList();} };
     li.querySelector('[data-a=del]').onclick=()=>{ pdfFiles.splice(idx,1); renderPdfList(); };
@@ -624,8 +630,34 @@ async function compressPdfBytes(bytes, scale, quality){
   return doc.output('arraybuffer');
 }
 
+// 페이지 크기 조정: 원본 PDF의 각 페이지를 비율을 유지한 채 지정한 용지(A4/A3) 가운데에
+// 맞춰 넣은 새 PDF를 만든다. pdf-lib의 embedPdf/drawPage로 원본 페이지를 하나의 이미지처럼
+// 새 페이지 위에 그려 넣는 방식이라 벡터 품질(텍스트 선명도)이 그대로 유지된다.
+// 원본이 가로로 긴 페이지면 용지도 가로 방향으로 맞춰(폭·높이를 바꿔) 여백이 과하게 남지 않게 한다.
+const PAGE_SIZES = { a4:{w:595.28,h:841.89}, a3:{w:841.89,h:1190.55} };
+async function resizePdfPages(bytes, sizeKey){
+  const base = PAGE_SIZES[sizeKey];
+  if(!base) return bytes;
+  const srcDoc = await PDFDocument.load(bytes, {ignoreEncryption:true});
+  const out = await PDFDocument.create();
+  // embedPdf()의 indices 기본값은 [0](첫 페이지만)이므로, 원본의 전체 페이지 수만큼
+  // 인덱스를 명시적으로 넘겨야 모든 페이지가 빠짐없이 포함된다.
+  const embeddedPages = await out.embedPdf(srcDoc, srcDoc.getPageIndices());
+  embeddedPages.forEach(ep=>{
+    const landscape = ep.width > ep.height;
+    const tw = landscape ? base.h : base.w;
+    const th = landscape ? base.w : base.h;
+    const page = out.addPage([tw, th]);
+    const scale = Math.min(tw/ep.width, th/ep.height);
+    const w = ep.width*scale, h = ep.height*scale;
+    page.drawPage(ep, {x:(tw-w)/2, y:(th-h)/2, xScale:scale, yScale:scale});
+  });
+  return out.save();
+}
+
 // 시공일지 변환본 + 첨부 PDF들을 하나로 병합한다. 첨부 PDF는 각 파일에 지정된 모드에 따라
-// 원본 그대로 붙이거나(keep), 이미지로 재인코딩해 압축한 뒤(compress) 붙인다.
+// 원본 그대로 붙이거나(keep), 이미지로 재인코딩해 압축한 뒤(compress) 붙이고, 페이지 크기
+// 옵션이 A4/A3로 지정되어 있으면 그 다음 단계로 페이지 크기까지 맞춰서 붙인다.
 async function mergeAllPdfBytes(){
   log('시공일지 PDF 변환 중...');
   const first=await sheetToPdfBytes();
@@ -637,15 +669,20 @@ async function mergeAllPdfBytes(){
   await add(first); log('추가됨: 공사시공일지(변환본)','ok');
   for(const pf of pdfFiles){
     const orig = await pf.file.arrayBuffer();
+    let bytes = orig;
+    let label = pf.file.name;
     if(pf.mode === 'compress'){
       log(`압축 중: ${pf.file.name} ...`);
-      const compressed = await compressPdfBytes(orig, 1.5, 0.55);
-      await add(compressed);
-      log(`추가됨: ${pf.file.name} (압축, ${fmtMB(orig.byteLength)} → ${fmtMB(compressed.byteLength)})`,'ok');
-    } else {
-      await add(orig);
-      log('추가됨: '+pf.file.name,'ok');
+      bytes = await compressPdfBytes(bytes, 1.5, 0.55);
+      label += ` (압축, ${fmtMB(orig.byteLength)} → ${fmtMB(bytes.byteLength)})`;
     }
+    if(pf.pageSize && pf.pageSize !== 'orig'){
+      log(`페이지 크기 조정 중(${pf.pageSize.toUpperCase()}): ${pf.file.name} ...`);
+      bytes = await resizePdfPages(bytes, pf.pageSize);
+      label += ` / ${pf.pageSize.toUpperCase()}로 조정`;
+    }
+    await add(bytes);
+    log('추가됨: '+label,'ok');
   }
   return merged.save();
 }

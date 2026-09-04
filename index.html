@@ -9,6 +9,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --bg:#f7f7f5; --card:#fff; --border:#e3e1dc; --text:#2b2a27; --muted:#8a8780;
@@ -102,6 +104,10 @@
     <div class="row" style="margin-top:12px;"><label style="font-size:13.5px;flex-shrink:0;">기타 의견</label>
       <input type="text" id="etcComment" placeholder="(선택) 기타 의견 입력"></div>
     <div class="hint">평가는 각 항목의 판단기준(적합/부분/미시행 등)을 선택하면 배점이 자동 기입됩니다. 기본값은 최고점입니다.</div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn accent2" id="btnSaveEval">이 날짜 평가 저장 (집계표에 누적)</button>
+      <span class="hint" id="evalSaveStatus" style="margin:auto 0;"></span>
+    </div>
   </div>
 
   <div class="card" id="cardPdf" style="display:none;">
@@ -126,12 +132,39 @@
     </div>
     <div id="bodyPreview" contenteditable="true"></div>
   </div>
+
+  <div class="card" id="cardAgg">
+    <h2><span class="step">5</span> 공사건별 시공평가 집계표</h2>
+    <div class="row">
+      <label style="font-size:13.5px;flex-shrink:0;">공사명</label>
+      <input type="text" id="aggSiteName" placeholder="예: ○○동 ○○번지 일원 도시가스 배관공사">
+      <button class="btn secondary" id="btnAggLoad">집계표 불러오기</button>
+    </div>
+    <div class="hint">위 2번 카드에서 "이 날짜 평가 저장"을 누른 기록이 같은 공사명 기준으로 쌓입니다. 여기서 공사명을 입력하고 불러오면, 저장된 모든 날짜의 점수를 항목별로 한 표에 모아 평균까지 보여줍니다(공사명이 정확히 같아야 같은 공사건으로 인식됩니다).</div>
+    <div id="aggTableWrap" style="overflow-x:auto;margin-top:10px;"></div>
+    <div class="row" id="aggActions" style="display:none;margin-top:10px;">
+      <button class="btn primary" id="btnAggPdf">집계표 PDF 저장</button>
+    </div>
+  </div>
 </div>
 
 <div id="renderHost"></div>
 <div class="toast" id="toast"></div>
 
 <script>
+/* ---------- Firebase (기존 순회점검일지·공사계획 도우미와 동일 프로젝트 재사용) ---------- */
+var firebaseConfig = {
+  apiKey: "AIzaSyCvnzRE_Rokhee4Jzhb6A6Xutm2FAJVuLY",
+  authDomain: "patrol-log-27942.firebaseapp.com",
+  projectId: "patrol-log-27942",
+  storageBucket: "patrol-log-27942.firebasestorage.app",
+  messagingSenderId: "766088948342",
+  appId: "1:766088948342:web:90e8dafe49c38fc6a74d57"
+};
+firebase.initializeApp(firebaseConfig);
+var firestoreDB = firebase.firestore();
+var DAILY_EVAL_COL = "dailyEvals";
+
 const { jsPDF } = window.jspdf;
 const { PDFDocument } = PDFLib;
 if(window.pdfjsLib){
@@ -193,6 +226,8 @@ async function loadExcel(file){
     showInfo(file.name);
     $('cardEval').style.display=$('cardPdf').style.display=$('cardDoc').style.display='block';
     buildDoc();
+    $('evalSaveStatus').textContent='';
+    if(!$('aggSiteName').value.trim() && meta.name) $('aggSiteName').value = meta.name;
   }catch(err){ alert('엑셀을 읽지 못했습니다: '+err.message); }
 }
 
@@ -767,6 +802,139 @@ $('btnCopyBody').addEventListener('click',async()=>{
   const ok=await copyRich($('bodyPreview'));
   toast(ok?'본문이 복사되었습니다 (표 포함)':'복사 실패 - 미리보기를 드래그해서 복사해 주세요');
 });
+
+/* ---------- 5. 공사건별 시공평가 집계표 (Firestore 누적) ---------- */
+// 공사명 비교는 공백 차이 등으로 어긋나지 않도록 norm()(모든 공백 제거)으로 정규화해서 맞춘다.
+function siteKey(name){ return norm(name); }
+
+// 오늘 평가(evalItems의 현재 선택값)를 "공사명+일자" 단위 문서로 Firestore에 저장(덮어쓰기 upsert).
+// 같은 공사명+같은 날짜로 다시 저장하면 그 날짜 값만 갱신되고, 다른 날짜는 그대로 유지된다.
+async function saveEvalToFirestore(){
+  if(!meta || !meta.name){ toast('먼저 시공일지 엑셀을 업로드하세요'); return; }
+  if(!meta.date){ toast('일자를 인식하지 못했습니다. 엑셀의 일자 항목을 확인하세요'); return; }
+  if(!evalItems.length){ toast('평가 항목이 없습니다'); return; }
+  const dateStr = `${meta.date.y}-${pad2(meta.date.m)}-${pad2(meta.date.d)}`;
+  const dateLabel = `${pad2(meta.date.m)}/${pad2(meta.date.d)}`;
+  const items = evalItems.map(it=>({
+    name: it.name,
+    score: Number(it.scores[it.sel]),
+    maxScore: Number(it.scores[0])
+  }));
+  const docId = `${siteKey(meta.name)}__${dateStr}`;
+  try{
+    await firestoreDB.collection(DAILY_EVAL_COL).doc(docId).set({
+      siteName: meta.name,
+      dateStr, dateLabel,
+      supName: $('supName').value.trim(),
+      items,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    $('evalSaveStatus').textContent = `저장됨: ${meta.name} / ${dateStr}`;
+    toast('평가가 저장되었습니다 (집계표에 반영)');
+    if(!$('aggSiteName').value.trim()) $('aggSiteName').value = meta.name;
+  }catch(e){ toast('저장 실패: '+e.message); }
+}
+$('btnSaveEval').addEventListener('click', saveEvalToFirestore);
+
+let aggData = null; // {siteName, docs}
+
+// 입력한 공사명으로 저장된 날짜별 평가 기록을 모두 불러온다. Firestore where 조건은 정확히
+// 같은 문자열이어야 매칭되므로, 정확 일치로 못 찾으면 전체를 가져와 정규화 비교로 한 번 더
+// 찾아본다(이 도구 특성상 문서 수가 많지 않아 전체 조회 비용이 크지 않다).
+async function loadAggregateForSite(){
+  const raw = $('aggSiteName').value.trim();
+  if(!raw){ toast('공사명을 입력하세요'); return; }
+  const key = siteKey(raw);
+  try{
+    toast('불러오는 중...');
+    const snap = await firestoreDB.collection(DAILY_EVAL_COL).where('siteName','==',raw).get();
+    let docs = snap.docs.map(d=>d.data());
+    if(!docs.length){
+      const allSnap = await firestoreDB.collection(DAILY_EVAL_COL).get();
+      docs = allSnap.docs.map(d=>d.data()).filter(d=>siteKey(d.siteName)===key);
+    }
+    if(!docs.length){
+      toast('저장된 평가 기록이 없습니다');
+      $('aggTableWrap').innerHTML='';
+      $('aggActions').style.display='none';
+      aggData=null;
+      return;
+    }
+    docs.sort((a,b)=> a.dateStr<b.dateStr?-1:a.dateStr>b.dateStr?1:0);
+    renderAggregateTable(raw, docs);
+    toast(`${docs.length}개 날짜 기록을 불러왔습니다`);
+  }catch(e){ toast('불러오기 실패: '+e.message); }
+}
+$('btnAggLoad').addEventListener('click', loadAggregateForSite);
+
+function renderAggregateTable(siteName, docs){
+  aggData = {siteName, docs};
+  // 항목 목록(행 순서)은 저장된 기록 중 항목 수가 가장 많은 것을 기준으로 삼는다
+  // (엑셀 서식이 중간에 바뀌어 항목이 늘거나 줄어도 표가 깨지지 않도록).
+  const base = docs.reduce((a,b)=> (b.items||[]).length > (a.items||[]).length ? b : a);
+  const itemNames = (base.items||[]).map(it=>it.name);
+  const th = v=>`<th style="border:1px solid #ccc;padding:5px 8px;background:#faf9f7;font-size:11.5px;white-space:nowrap;">${v}</th>`;
+  const td = (v,st)=>`<td style="border:1px solid #ccc;padding:5px 8px;font-size:11.5px;text-align:center;${st||''}">${v}</td>`;
+  let head = th('항목')+th('배점');
+  docs.forEach(d=>{ head += th(d.dateLabel||d.dateStr); });
+  head += th('평균');
+  let rows='';
+  itemNames.forEach(name=>{
+    let maxScore='-';
+    const rowVals = docs.map(d=>{
+      const it=(d.items||[]).find(x=>x.name===name);
+      if(it && maxScore==='-') maxScore = it.maxScore;
+      return it ? it.score : null;
+    });
+    const nums = rowVals.filter(v=>v!=null);
+    const avg = nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length) : null;
+    rows += '<tr>'+td(name,'text-align:left;')+td(maxScore);
+    rowVals.forEach(v=>{ rows += td(v==null?'-':v); });
+    rows += td(avg==null?'-':avg.toFixed(2),'font-weight:700;')+'</tr>';
+  });
+  const table = `<table style="border-collapse:collapse;width:100%;">`+
+    `<tr>${head}</tr>${rows}</table>`;
+  $('aggTableWrap').innerHTML =
+    `<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px;">현장명: <b>${siteName}</b> · 집계된 날짜 ${docs.length}건</div>${table}`;
+  $('aggActions').style.display='flex';
+}
+
+// 임의의 DOM 요소를 캔버스로 캡처해 PDF로 저장한다(가로/세로 방향을 선택할 수 있도록 별도 구현;
+// 기존 addCanvasAsPages()는 세로 A4 크기가 고정값으로 박혀 있어 가로 방향에는 쓸 수 없다).
+async function elementToPdf(el, filename, orientation){
+  const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
+  const doc = new jsPDF({orientation, unit:'pt', format:'a4'});
+  const pw = orientation==='l' ? 841.89 : 595.28;
+  const ph = orientation==='l' ? 595.28 : 841.89;
+  const mg = 18;
+  const imgW = pw-mg*2, pageH = ph-mg*2;
+  const fullH = canvas.height*imgW/canvas.width;
+  if(fullH<=pageH){
+    doc.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',mg,mg,imgW,fullH);
+  }else{
+    const sliceH = Math.floor(canvas.width*pageH/imgW);
+    let y=0, first=true;
+    while(y<canvas.height){
+      const h=Math.min(sliceH, canvas.height-y);
+      const pc=document.createElement('canvas'); pc.width=canvas.width; pc.height=h;
+      pc.getContext('2d').drawImage(canvas,0,y,canvas.width,h,0,0,canvas.width,h);
+      if(!first) doc.addPage();
+      doc.addImage(pc.toDataURL('image/jpeg',0.92),'JPEG',mg,mg,imgW,h*imgW/canvas.width);
+      first=false; y+=h;
+    }
+  }
+  download(doc.output('arraybuffer'), filename);
+}
+
+async function buildAggregatePdf(){
+  if(!aggData){ toast('먼저 집계표를 불러오세요'); return; }
+  try{
+    toast('PDF 생성 중...');
+    await elementToPdf($('aggTableWrap'), `집계표(${aggData.siteName}).pdf`, 'l');
+    toast('PDF 저장 완료');
+  }catch(e){ toast('실패: '+e.message); }
+}
+$('btnAggPdf').addEventListener('click', buildAggregatePdf);
 </script>
 </body>
 </html>

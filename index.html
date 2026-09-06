@@ -109,6 +109,7 @@
       <button class="btn accent2" id="btnSaveEval">이 날짜 평가 저장 (집계표에 누적)</button>
       <span class="hint" id="evalSaveStatus" style="margin:auto 0;"></span>
     </div>
+    <div class="hint">아래 4단계에서 "시공일지 + PDF 병합 저장"을 누르면 이 날짜 평가가 집계표에 자동 저장됩니다. 병합 전에 미리 저장하고 싶을 때만 위 버튼을 누르세요.</div>
   </div>
 
   <div class="card" id="cardPdf" style="display:none;">
@@ -729,7 +730,10 @@ $('btnMerge').addEventListener('click',async()=>{
     const mergedBytes=await mergeAllPdfBytes();
     download(mergedBytes,`공사시공일지_첨부일체(${dateTag()}).pdf`);
     log('병합 완료: 첨부일체 PDF 저장됨','ok');
-  }catch(e){ log('병합 실패: '+e.message,'err'); }
+  }catch(e){ log('병합 실패: '+e.message,'err'); return; }
+  // 병합이 끝나면 이 날짜의 시공평가를 집계표(Firestore)에 자동 저장한다. 같은 공사명+날짜는
+  // 덮어쓰기(upsert)이므로 병합을 여러 번 눌러도 중복 누적되지 않는다.
+  await saveEvalToFirestore(true);
 });
 
 /* ---------- approval document (title & body) ---------- */
@@ -811,10 +815,13 @@ function siteKey(name){ return norm(name); }
 
 // 오늘 평가(evalItems의 현재 선택값)를 "공사명+일자" 단위 문서로 Firestore에 저장(덮어쓰기 upsert).
 // 같은 공사명+같은 날짜로 다시 저장하면 그 날짜 값만 갱신되고, 다른 날짜는 그대로 유지된다.
-async function saveEvalToFirestore(){
-  if(!meta || !meta.name){ toast('먼저 시공일지 엑셀을 업로드하세요'); return; }
-  if(!meta.date){ toast('일자를 인식하지 못했습니다. 엑셀의 일자 항목을 확인하세요'); return; }
-  if(!evalItems.length){ toast('평가 항목이 없습니다'); return; }
+// auto=true면 PDF 병합 버튼에서 자동 호출된 경우로, 안내는 toast 대신 병합 로그(log)에 남기고
+// 성공 여부를 true/false로 돌려준다(병합 자체는 저장 실패와 무관하게 계속 진행되도록).
+async function saveEvalToFirestore(auto){
+  const say = (msg, kind)=> auto ? log(msg, kind||'') : toast(msg);
+  if(!meta || !meta.name){ say('집계표 저장 생략: 먼저 시공일지 엑셀을 업로드하세요','err'); return false; }
+  if(!meta.date){ say('집계표 저장 생략: 일자를 인식하지 못했습니다. 엑셀의 일자 항목을 확인하세요','err'); return false; }
+  if(!evalItems.length){ say('집계표 저장 생략: 평가 항목이 없습니다','err'); return false; }
   const dateStr = `${meta.date.y}-${pad2(meta.date.m)}-${pad2(meta.date.d)}`;
   const dateLabel = `${pad2(meta.date.m)}/${pad2(meta.date.d)}`;
   const items = evalItems.map(it=>({
@@ -832,11 +839,12 @@ async function saveEvalToFirestore(){
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     $('evalSaveStatus').textContent = `저장됨: ${meta.name} / ${dateStr}`;
-    toast('평가가 저장되었습니다 (집계표에 반영)');
+    say(`평가가 집계표에 저장되었습니다 (${meta.name} / ${dateStr})`,'ok');
     if(!$('aggSiteName').value.trim()) $('aggSiteName').value = meta.name;
-  }catch(e){ toast('저장 실패: '+e.message); }
+    return true;
+  }catch(e){ say('집계표 저장 실패: '+e.message,'err'); return false; }
 }
-$('btnSaveEval').addEventListener('click', saveEvalToFirestore);
+$('btnSaveEval').addEventListener('click', ()=>saveEvalToFirestore(false));
 
 let aggData = null; // {siteName, docs}
 

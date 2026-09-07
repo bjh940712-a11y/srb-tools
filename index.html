@@ -961,7 +961,7 @@ function normItemName(name){
   return String(name||'')
     .replace(/\([^)]*\)/g,'')   // "(top5 신설)" "(품질로 이동)" 같은 괄호 주석 제거
     .replace(/^\d+\.\s*/,'')    // "1. " 같은 번호 매김 제거
-    .replace(/\s+/g,'');        // 공백·줄바꿈 차이 무시
+    .replace(/[\s_\-·,./~]+/g,''); // 공백·줄바꿈·밑줄·구분기호 차이 무시 ("물청소 실시_비산먼지 예방" = "물청소 실시 비산먼지 예방")
 }
 // docs(날짜별 저장 기록)를 표준 항목 순서에 맞춰 {group, name, maxScore, vals[]} 행 배열로 만든다.
 function buildAggRows(docs){

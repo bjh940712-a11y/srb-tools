@@ -35,6 +35,7 @@
   .info b{color:var(--blue);}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;}
   input[type=text]{border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:14px;flex:1;min-width:180px;}
+  #aggSiteName{border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:14px;background:#fff;flex:1;min-width:180px;}
   textarea{border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:13.5px;width:100%;resize:vertical;font-family:inherit;}
   button.btn{border:none;border-radius:8px;padding:10px 16px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;}
   .btn.primary{background:var(--accent);color:#fff;}
@@ -139,7 +140,8 @@
     <h2><span class="step">5</span> 공사건별 시공평가 집계표</h2>
     <div class="row">
       <label style="font-size:13.5px;flex-shrink:0;">공사명</label>
-      <input type="text" id="aggSiteName" placeholder="예: ○○동 ○○번지 일원 도시가스 배관공사">
+      <select id="aggSiteName" style="flex:1;min-width:0;"><option value="">— 저장된 공사건을 선택하세요 —</option></select>
+      <button class="btn secondary" id="btnAggSiteRefresh" title="목록 새로고침">↻</button>
       <button class="btn secondary" id="btnAggLoad">집계표 불러오기</button>
     </div>
     <div class="hint">위 2번 카드에서 "이 날짜 평가 저장"을 누른 기록이 같은 공사명 기준으로 쌓입니다. 여기서 공사명을 입력하고 불러오면, 저장된 모든 날짜의 점수를 항목별로 한 표에 모아 평균까지 보여줍니다(공사명이 정확히 같아야 같은 공사건으로 인식됩니다).</div>
@@ -235,7 +237,7 @@ async function loadExcel(file){
     $('cardEval').style.display=$('cardPdf').style.display=$('cardDoc').style.display='block';
     buildDoc();
     $('evalSaveStatus').textContent='';
-    if(!$('aggSiteName').value.trim() && meta.name) $('aggSiteName').value = meta.name;
+    if(!$('aggSiteName').value.trim() && meta.name) setAggSite(meta.name);
   }catch(err){ alert('엑셀을 읽지 못했습니다: '+err.message); }
 }
 
@@ -845,7 +847,8 @@ async function saveEvalToFirestore(auto){
     });
     $('evalSaveStatus').textContent = `저장됨: ${meta.name} / ${dateStr}`;
     say(`평가가 집계표에 저장되었습니다 (${meta.name} / ${dateStr})`,'ok');
-    if(!$('aggSiteName').value.trim()) $('aggSiteName').value = meta.name;
+    setAggSite(meta.name);
+    refreshAggSiteOptions();
     return true;
   }catch(e){ say('집계표 저장 실패: '+e.message,'err'); return false; }
 }
@@ -881,6 +884,37 @@ async function loadAggregateForSite(){
   }catch(e){ toast('불러오기 실패: '+e.message); }
 }
 $('btnAggLoad').addEventListener('click', loadAggregateForSite);
+
+// 공사명 콤보박스: 집계표에 저장된 공사건 목록을 Firestore에서 읽어 채운다(최근 저장된 공사 먼저).
+// 페이지를 열 때, 평가를 저장했을 때, ↻ 버튼을 눌렀을 때 갱신된다.
+function setAggSite(name){
+  const sel = $('aggSiteName');
+  if(!name){ sel.value=''; return; }
+  const key = siteKey(name);
+  let opt = [...sel.options].find(o=>o.value && siteKey(o.value)===key);
+  if(!opt){ opt = document.createElement('option'); opt.value=name; opt.textContent=name; sel.appendChild(opt); }
+  sel.value = opt.value;
+}
+async function refreshAggSiteOptions(){
+  const sel = $('aggSiteName');
+  const keep = sel.value;
+  try{
+    const snap = await firestoreDB.collection(DAILY_EVAL_COL).get();
+    const groups = new Map(); // siteKey -> {name, last}
+    snap.docs.forEach(d=>{
+      const data=d.data(); if(!data.siteName) return;
+      const k=siteKey(data.siteName), g=groups.get(k);
+      if(!g || data.dateStr>g.last) groups.set(k,{name:data.siteName,last:data.dateStr||''});
+    });
+    const list=[...groups.values()].sort((a,b)=> a.last<b.last?1:a.last>b.last?-1:0);
+    sel.innerHTML = '<option value="">— 저장된 공사건을 선택하세요 —</option>';
+    list.forEach(g=>{ const o=document.createElement('option'); o.value=g.name; o.textContent=g.name; sel.appendChild(o); });
+    if(keep) setAggSite(keep);
+  }catch(e){ toast('공사건 목록 조회 실패: '+e.message); }
+}
+$('btnAggSiteRefresh').addEventListener('click', ()=>{ refreshAggSiteOptions().then(()=>toast('공사건 목록을 새로고침했습니다')); });
+$('aggSiteName').addEventListener('change', ()=>{ if($('aggSiteName').value) loadAggregateForSite(); });
+refreshAggSiteOptions();
 
 // 집계표에 누적된 전체 현황을 공사건별로 한 줄씩 요약해 보여준다(저장 일수, 기간, 담당, 득점률).
 // 각 행의 "불러오기"를 누르면 그 공사명이 입력칸에 채워지고 바로 집계표가 열린다.
@@ -922,7 +956,7 @@ async function loadAggOverview(){
     html += '</table>';
     wrap.innerHTML = html;
     wrap.querySelectorAll('button[data-site]').forEach(b=>b.addEventListener('click',()=>{
-      $('aggSiteName').value = b.dataset.site;
+      setAggSite(b.dataset.site);
       loadAggregateForSite();
     }));
     status.textContent = `공사 ${rows.length}건 / 총 ${snap.size}일 기록`;

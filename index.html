@@ -1061,7 +1061,8 @@ const EVAL_SHEET_TPL = {"styles":[{"fn":"맑은 고딕","fs":30.0,"fb":true,"fc"
 // 32개 항목 중 21개(안전시공 11, 품질시공 6, 현장관리 4)의 점수는 집계표 시트의 평균(Z)열을
 // 참조하는 수식이었고(원본 집계표 6~26행 = 이 도구 집계표 5~25행), 나머지 11개는 준공검사 때
 // 수기로 채우는 칸이므로 비워둔다. 소계/합계/백분율/등급 수식은 원본 그대로다.
-function addEvalReportSheet(wb, siteName, docs, nDay){
+function addEvalReportSheet(wb, siteName, docs, nDay, fallback){
+  fallback = fallback || {};
   const T = EVAL_SHEET_TPL;
   const ws = wb.addWorksheet('공사구간별 시공평가서', {
     views:[{showGridLines:false}],
@@ -1075,8 +1076,11 @@ function addEvalReportSheet(wb, siteName, docs, nDay){
   for(let k=sorted.length-1;k>=0;k--){ if(sorted[k].supName){ supName=sorted[k].supName; break; } }
   // 시공업체명/시공관리자/준공규모는 마지막 날짜 시공일지에서 가져온다(누계는 마지막 날 기준).
   const lastDoc = sorted.length ? sorted[sorted.length-1] : {};
-  const pick = key=>{ for(let k=sorted.length-1;k>=0;k--){ if(sorted[k][key]) return sorted[k][key]; } return ''; };
-  const maxDia = Number(lastDoc.maxDia)||0, cumLen = (lastDoc.cumLen==null||isNaN(Number(lastDoc.cumLen))) ? null : Number(lastDoc.cumLen);
+  // 저장 기록에 값이 없으면(이 기능 추가 전에 저장된 날짜들) 현재 업로드된 시공일지(fallback)에서 가져온다.
+  const pick = key=>{ for(let k=sorted.length-1;k>=0;k--){ if(sorted[k][key]) return sorted[k][key]; } return fallback[key]||''; };
+  const maxDia = Number(lastDoc.maxDia) || Number(fallback.maxDia) || 0;
+  const cumSrc = (lastDoc.cumLen!=null && !isNaN(Number(lastDoc.cumLen))) ? lastDoc.cumLen : fallback.cumLen;
+  const cumLen = (cumSrc==null || isNaN(Number(cumSrc))) ? null : Number(cumSrc);
   const over = {
     D5: siteName, D6: pick('contractor')||null, D7: pick('manager')||null, D8:null,
     T5: maxDia ? `${maxDia}A 외` : null, Y5:null, Z5: cumLen, AD5:'m', T6:null,
@@ -1235,7 +1239,10 @@ async function buildAggregateExcel(){
     // "공사구간별 시공평가서" 시트를 같은 워크북에 추가한다. 원본 엑셀의 수식 구조를 분석한 결과,
     // 이 시트의 21개 항목 점수는 "집계표" 시트의 평균값을 그대로 참조하는 실제 수식으로 연결돼
     // 있었으므로, 여기서도 방금 만든 집계표 시트를 실제 수식으로 참조하게 만든다(값 복사가 아님).
-    addEvalReportSheet(wb, siteName, docs, nDay);
+    // 현재 업로드된 시공일지가 같은 공사면 업체명/관리자/규모의 대체 정보로 넘긴다(옛 기록 보완용).
+    const fb = (meta && meta.name && siteKey(meta.name)===siteKey(siteName))
+      ? {contractor:meta.contractor, manager:meta.manager, maxDia:meta.maxDia, cumLen:meta.cumLen} : {};
+    addEvalReportSheet(wb, siteName, docs, nDay, fb);
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});

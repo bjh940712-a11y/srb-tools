@@ -787,9 +787,15 @@ function buildDoc(){
   rows+='<tr>'+cell('합 계',G).replace('<td ','<td colspan="3" ')+cell(fmt(grid[tr][hc.plan]),G)+cell(dash(grid[tr][hc.prev]),G)+cell(dash(grid[tr][hc.today]),G)+cell(dash(grid[tr][hc.cum]),G)+cell(fmt(grid[tr][hc.rate]),G)+'</tr>';
 
   const H='background:#dbe5f1;font-weight:700;';
-  const table=`<table style="border-collapse:collapse;margin:8px 0;">
+  // 전자결재 편집기에 붙여넣으면 폭이 지정되지 않은 표는 본문 전체 폭(100%)으로 늘어나므로,
+  // 표 전체 폭과 열 폭을 픽셀로 고정해 미리보기와 같은 크기로 붙도록 한다.
+  const CW=[55,45,60,65,55,55,60,70]; // 압력/재질/관경/계획/전일/금일/누계/공정률
+  const TW=CW.reduce((a,b)=>a+b,0);
+  const hcell=(v,st,i)=>cell(v,st+`width:${CW[i]}px;`).replace('<td ',`<td width="${CW[i]}" `);
+  const table=`<table width="${TW}" style="border-collapse:collapse;margin:8px 0;table-layout:fixed;width:${TW}px;">
+    <colgroup>${CW.map(w=>`<col width="${w}" style="width:${w}px;">`).join('')}</colgroup>
     <tr>${cell('구분',H).replace('<td ','<td colspan="4" ')}${cell('실적(M)',H).replace('<td ','<td colspan="4" ')}</tr>
-    <tr>${cell('압력',H)}${cell('재질',H)}${cell('관경(A)',H)}${cell('계획(M)',H)}${cell('전일',H)}${cell('금일',H+Y)}${cell('누계',H)}${cell('공정률(%)',H)}</tr>
+    <tr>${hcell('압력',H,0)}${hcell('재질',H,1)}${hcell('관경(A)',H,2)}${hcell('계획(M)',H,3)}${hcell('전일',H,4)}${hcell('금일',H+Y,5)}${hcell('누계',H,6)}${hcell('공정률(%)',H,7)}</tr>
     ${rows}</table>`;
 
   $('bodyPreview').innerHTML=

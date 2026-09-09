@@ -760,7 +760,7 @@ function buildDoc(){
   $('docTitle').value=`공사시공일지(${dateTag()}_${meta.name})`;
 
   const hc=anchors.hcol;
-  const cell=(v,st)=>`<td style="border:1px solid #555;padding:7px 6px;text-align:center;font-size:13px;line-height:1.4;${st||''}">${v}</td>`;
+  const cell=(v,st)=>`<td style="border:1px solid #555;padding:5px 6px;text-align:center;font-size:12px;line-height:1.4;${st||''}">${v}</td>`;
   const dash=v=>(typeof v==='number'&&v!==0)?fmt(v):'-';
   const Y='background:#ffff00;', O='background:#ffc000;font-weight:700;', G='background:#92d050;font-weight:700;';
 
@@ -788,7 +788,7 @@ function buildDoc(){
 
   const H='background:#dbe5f1;font-weight:700;';
   // 결재문서(보고서) 본문에 붙였을 때의 표 크기 기준: 본문 폭 100%, 8개 열 균등(12.5%씩), 13px 글자.
-  const table=`<table width="100%" style="border-collapse:collapse;margin:8px 0;table-layout:fixed;width:100%;">
+  const table=`<table width="95%" style="border-collapse:collapse;margin:8px 0;table-layout:fixed;width:95%;">
     <colgroup>${Array.from({length:8}).map(()=>'<col width="12.5%" style="width:12.5%;">').join('')}</colgroup>
     <tr>${cell('구분',H).replace('<td ','<td colspan="4" ')}${cell('실적(M)',H).replace('<td ','<td colspan="4" ')}</tr>
     <tr>${cell('압력',H)}${cell('재질',H)}${cell('관경(A)',H)}${cell('계획(M)',H)}${cell('전일',H)}${cell('금일',H+Y)}${cell('누계',H)}${cell('공정률(%)',H)}</tr>
@@ -796,7 +796,7 @@ function buildDoc(){
 
   $('bodyPreview').innerHTML=
     `<div style="font-size:13px;line-height:1.9;">시공 완료 구간의 일일 시공현황을 보고드립니다.<br><br>`+
-    `<div style="text-align:center;">----아&nbsp;&nbsp;래----</div><br>`+
+    `<p align="center" style="text-align:center;margin:0;">----아&nbsp;&nbsp;래----</p><br>`+
     `1. 공사명 : ${meta.name}<br>`+
     `2. 공사일 : ${d?`${pad2(d.m)}월 ${pad2(d.d)}일`:meta.dateRaw} [${meta.yoil}]<br>`+
     `3. 시공업체 : ${meta.contractor}<br>`+

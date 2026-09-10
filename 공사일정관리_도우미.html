@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>공사지원 도우미 - 공사 일정 관리 도우미</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg:#f7f7f5; --card:#fff; --border:#e3e1dc; --text:#2b2a27; --muted:#8a8780;
+    --accent:#c15f3c; --accent-dark:#a34e30; --ok:#4a7c59; --err:#b3432b; --blue:#3b6ea5;
+    --pipe:#3b6ea5; --pipe-bg:#dce8f5; --pave:#4a7c59; --pave-bg:#dff0e3; --lm:#c15f3c; --lm-bg:#fbe8e1;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;
+    background:var(--bg);color:var(--text);padding:28px 14px;}
+  .wrap{max-width:1100px;margin:0 auto;}
+  h1{font-size:22px;margin:0 0 4px;}
+  p.sub{color:var(--muted);margin:0 0 22px;font-size:13.5px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:14px;}
+  .card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+  .step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+    border-radius:50%;background:var(--accent);color:#fff;font-size:12.5px;flex-shrink:0;}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+  input[type=text],input[type=date],input[type=number],select,textarea{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13.5px;background:#fff;font-family:inherit;}
+  input[type=file]{display:none;}
+  textarea{width:100%;resize:vertical;}
+  button.btn{border:none;border-radius:8px;padding:9px 15px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;}
+  .btn.primary{background:var(--accent);color:#fff;}
+  .btn.primary:hover{background:var(--accent-dark);}
+  .btn.secondary{background:#eee;color:var(--text);}
+  .btn.secondary:hover{background:#e0e0e0;}
+  .btn.accent2{background:#fff;color:#3b6ea5;border:1.5px solid #3b6ea5;}
+  .btn.accent2:hover{background:#eef4fa;}
+  .btn.danger{background:#fff;color:var(--err);border:1.5px solid var(--err);}
+  .btn.danger:hover{background:#fbeeea;}
+  .btn.sm{padding:5px 10px;font-size:12px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;
+    padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:999;}
+  .toast.show{opacity:1;}
+  .sitenav{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap;}
+  .sitenav a{font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;
+    border:1.5px solid var(--border);color:var(--muted);background:#fff;transition:.15s;}
+  .sitenav a:hover{border-color:var(--accent);color:var(--accent-dark);}
+  .sitenav a.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .brand{font-size:11.5px;font-weight:800;color:var(--accent);letter-spacing:.5px;margin:0 0 8px;}
+
+  /* 사용자(지사) 탭 */
+  .usertabs{display:flex;gap:6px;flex-wrap:wrap;}
+  .usertabs button{border:1.5px solid var(--border);background:#fff;color:var(--muted);font-weight:700;font-size:13px;
+    padding:8px 18px;border-radius:20px;cursor:pointer;transition:.15s;}
+  .usertabs button.on{background:var(--blue);border-color:var(--blue);color:#fff;}
+  .usertabs button:hover:not(.on){border-color:var(--blue);color:var(--blue);}
+
+  /* 캘린더 */
+  .calhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+  .calhead .ym{font-size:19px;font-weight:800;min-width:130px;text-align:center;}
+  .calhead .nav{border:1px solid var(--border);background:#fff;border-radius:8px;width:34px;height:34px;font-size:15px;cursor:pointer;}
+  .calhead .nav:hover{background:#f1f1ef;}
+  .calhead .spacer{flex:1;}
+  .filters{display:flex;gap:6px 14px;flex-wrap:wrap;font-size:12.5px;margin:6px 0 10px;align-items:center;}
+  .filters label{display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;}
+  .filters .sw{display:inline-block;width:11px;height:11px;border-radius:3px;}
+  .cal{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;}
+  .dow{display:grid;grid-template-columns:repeat(7,1fr);background:#f4f3f0;border-bottom:1px solid var(--border);}
+  .dow div{padding:7px 0;text-align:center;font-size:12px;font-weight:700;color:var(--muted);}
+  .dow div:first-child{color:#c94b3f;} .dow div:last-child{color:#3b6ea5;}
+  .week{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--border);position:relative;
+    grid-template-rows:28px;grid-auto-rows:min-content;}
+  .week:last-child{border-bottom:none;}
+  .day{grid-row:1;border-right:1px solid var(--border);padding:4px 6px;font-size:12px;min-height:26px;cursor:pointer;}
+  .day:nth-child(7){border-right:none;}
+  .day .n{font-weight:700;display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;}
+  .day.other{color:#c8c6c0;background:#fbfbfa;}
+  .day.today .n{background:var(--accent);color:#fff;}
+  .day.sun:not(.other) .n{color:#c94b3f;} .day.sat:not(.other) .n{color:#3b6ea5;}
+  .day.today.sun .n,.day.today.sat .n{color:#fff;}
+  .day:hover{background:#f7f5f2;}
+  .bar{font-size:11px;line-height:1.25;padding:2px 6px;margin:1px 2px;border-radius:5px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;cursor:pointer;border-left:3px solid;position:relative;z-index:1;}
+  .bar.pipe{background:var(--pipe-bg);border-color:var(--pipe);color:#25476b;}
+  .bar.pave{background:var(--pave-bg);border-color:var(--pave);color:#2e5238;}
+  .bar.lm{background:var(--lm-bg);border-color:var(--lm);color:#8a4028;font-weight:700;}
+  .bar.ongoing{background-image:repeating-linear-gradient(135deg,transparent 0 6px,rgba(255,255,255,.55) 6px 9px);}
+  .bar.ongoing::after{content:'›';position:absolute;right:5px;top:0;font-weight:800;}
+  .bar.contL{border-top-left-radius:0;border-bottom-left-radius:0;border-left-width:0;}
+  .bar.contR{border-top-right-radius:0;border-bottom-right-radius:0;}
+  .bar.retired{opacity:.55;text-decoration:line-through;}
+  .more{font-size:11px;color:var(--blue);padding:1px 6px;cursor:pointer;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .more:hover{text-decoration:underline;}
+  .pad{height:4px;}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px;}
+  .legend span{display:flex;align-items:center;gap:5px;}
+  .legend i{display:inline-block;width:22px;height:11px;border-radius:3px;border-left:3px solid;}
+
+  /* 모달 */
+  .ovl{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-start;justify-content:center;z-index:100;overflow-y:auto;padding:30px 12px;}
+  .ovl.show{display:flex;}
+  .modal{background:#fff;border-radius:12px;width:100%;max-width:720px;padding:20px 22px;box-shadow:0 10px 40px rgba(0,0,0,.2);}
+  .modal h3{margin:0 0 12px;font-size:16px;display:flex;align-items:center;gap:8px;}
+  .modal h3 .x{margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:var(--muted);}
+  .sec{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px;background:#fbfbfa;}
+  .sec .t{font-size:13px;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+  .sec .t .sw{display:inline-block;width:12px;height:12px;border-radius:3px;}
+  .fg{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;}
+  .fg.three{grid-template-columns:1fr 1fr 1fr;}
+  .f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);}
+  .f input,.f select{width:100%;font-size:13px;}
+  .f.full{grid-column:1/-1;}
+  .chk{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);margin-top:4px;}
+  .modal .actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;}
+  .modal .actions .right{margin-left:auto;display:flex;gap:8px;}
+  @media(max-width:640px){.fg,.fg.three{grid-template-columns:1fr;} .modal{padding:14px;}}
+
+  /* 목록/결과 */
+  table.list{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:8px;}
+  table.list th,table.list td{border:1px solid var(--border);padding:6px 8px;text-align:center;}
+  table.list th{background:#f4f3f0;font-weight:700;white-space:nowrap;}
+  table.list td.l{text-align:left;}
+  table.list tr:hover td{background:#fbfaf7;}
+  .tag{font-size:11px;padding:2px 7px;border-radius:20px;font-weight:600;background:#eee;color:#555;white-space:nowrap;}
+  .tag.ongoing{background:#fff1c9;color:#8a6200;}
+  .tag.retired{background:#eee;color:#999;}
+  .dayitem{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;font-size:13px;cursor:pointer;background:#fbfbfa;}
+  .dayitem:hover{border-color:var(--accent);}
+  .dayitem .sw{width:12px;height:12px;border-radius:3px;flex-shrink:0;}
+  .dayitem .nm{flex:1;}
+  .drop{border:2px dashed var(--border);border-radius:10px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;font-size:13px;transition:.15s;}
+  .drop:hover,.drop.drag{border-color:var(--accent);background:#fdf5f1;color:var(--accent-dark);}
+  .mapgrid{display:grid;grid-template-columns:150px 1fr;gap:6px 10px;align-items:center;font-size:13px;margin-top:8px;}
+  .sum{font-size:13px;line-height:1.8;margin-top:8px;}
+  .sum b{color:var(--blue);}
+  @media(max-width:640px){
+    body{padding:14px 6px;}
+    .week{grid-template-rows:24px;}
+    .day{padding:2px 3px;font-size:11px;min-height:22px;}
+    .day .n{width:18px;height:18px;line-height:18px;font-size:11px;}
+    .bar{font-size:9.5px;padding:1px 3px;margin:1px 1px;border-left-width:2px;}
+    .calhead .ym{font-size:16px;min-width:110px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">공사지원 도우미</div>
+  <div class="sitenav">
+    <a href="index.html">① 공사시공일지 도우미</a>
+    <a href="소규모배관공사_준공도우미.html">② 소규모 배관공사 준공 도우미</a>
+    <a href="소규모포장공사_준공도우미.html">③ 소규모 포장공사 준공 도우미</a>
+    <a href="공사계획_신고승인_작성_도우미.html">④ 공사계획 신고/승인 작성 도우미</a>
+    <a href="도로점용허가서류_도우미.html">⑤ 도로점용허가서류 도우미</a>
+    <a href="공사일정관리_도우미.html" class="on">⑥ 공사 일정 관리 도우미</a>
+  </div>
+  <h1>공사 일정 관리 도우미</h1>
+  <p class="sub">ERP 공사정보 엑셀을 올리거나 직접 등록한 공사의 배관공사·라인마크·포장공사 일정을 월 캘린더로 관리합니다. 데이터는 Firebase에 저장되어 어느 PC에서 열어도 같은 내용이 보입니다.</p>
+
+  <div class="card">
+    <h2><span class="step">1</span> 사용자(지사) 선택</h2>
+    <div class="usertabs" id="userTabs"></div>
+    <div class="hint">선택한 사용자의 공사만 표시·등록됩니다. 사용자별로 데이터가 분리되어 저장되며, 공사 수정 창에서 소속을 다른 사용자로 옮길 수 있습니다.</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span> 월 캘린더</h2>
+    <div class="calhead">
+      <button class="nav" id="btnPrev">◀</button>
+      <div class="ym" id="ymLabel"></div>
+      <button class="nav" id="btnNext">▶</button>
+      <button class="btn secondary sm" id="btnToday">오늘</button>
+      <div class="spacer"></div>
+      <button class="btn primary sm" id="btnAdd">+ 공사 직접 등록</button>
+      <button class="btn accent2 sm" id="btnUpload">엑셀 일괄 등록</button>
+      <button class="btn secondary sm" id="btnList">전체 목록</button>
+      <button class="btn secondary sm" id="btnReload" title="Firebase에서 다시 불러오기">↻</button>
+    </div>
+    <div class="filters" id="filters">
+      <span style="color:var(--muted);font-weight:700;">공사구분</span>
+      <label><input type="checkbox" data-cat="소규모" checked>소규모</label>
+      <label><input type="checkbox" data-cat="일반공사" checked>일반공사</label>
+      <label><input type="checkbox" data-cat="일반공사_MOU" checked>일반공사_MOU</label>
+      <label><input type="checkbox" data-cat="일반공사_MOU인입" checked>일반공사_MOU인입</label>
+      <label><input type="checkbox" data-cat="기타" checked>기타</label>
+      <label><input type="checkbox" data-cat="폐지">폐지 건 포함 보기</label>
+      <span style="color:var(--muted);font-weight:700;margin-left:8px;">일정</span>
+      <label><span class="sw" style="background:var(--pipe)"></span><input type="checkbox" data-type="pipe" checked>배관공사</label>
+      <label><span class="sw" style="background:var(--lm)"></span><input type="checkbox" data-type="lm" checked>라인마크</label>
+      <label><span class="sw" style="background:var(--pave)"></span><input type="checkbox" data-type="pave" checked>포장공사</label>
+    </div>
+    <div class="cal">
+      <div class="dow"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div>
+      <div id="calBody"></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--pipe-bg);border-color:var(--pipe)"></i>배관공사 기간</span>
+      <span><i style="background:var(--pave-bg);border-color:var(--pave)"></i>포장공사 기간</span>
+      <span><i style="background:var(--lm-bg);border-color:var(--lm)"></i>라인마크 설치일</span>
+      <span><i class="bar ongoing" style="background:var(--pipe-bg);border-color:var(--pipe);padding:0;margin:0;"></i>빗금 = 준공일 미정(진행중, 오늘까지 표시)</span>
+    </div>
+    <div class="hint">날짜 칸을 누르면 그날의 일정 목록, 막대를 누르면 공사 상세/수정 창이 열립니다. 다른 PC에서 수정한 내용은 ↻ 버튼(또는 새로고침)으로 반영됩니다. 아래 JSON 내보내기로 전체 백업을 받아 둘 수 있습니다.</div>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn secondary sm" id="btnExport">JSON 내보내기(백업)</button>
+      <button class="btn secondary sm" id="btnImport">JSON 가져오기(복원)</button>
+      <input type="file" id="importFile" accept=".json">
+      <span class="hint" id="countInfo" style="margin:0 0 0 auto;"></span>
+    </div>
+  </div>
+</div>
+
+<!-- 공사 등록/수정 -->
+<div class="ovl" id="ovlEdit"><div class="modal">
+  <h3 id="editTitle">공사 등록<button class="x" data-close="ovlEdit">×</button></h3>
+  <div class="sec"><div class="t">기본 정보</div>
+    <div class="fg">
+      <div class="f">공사구분<select id="f_category"><option>소규모</option><option>일반공사</option><option>일반공사_MOU</option><option>일반공사_MOU인입</option><option>폐지</option><option>기타</option></select></div>
+      <div class="f">공사ID (선택)<input type="text" id="f_cid" placeholder="ERP 공사ID"></div>
+      <div class="f full">공사명 *<input type="text" id="f_name"></div>
+      <div class="f">법정동<input type="text" id="f_dong"></div>
+      <div class="f">주소<input type="text" id="f_addr"></div>
+      <div class="f">소속 사용자<select id="f_owner"></select></div>
+      <div class="f full">비고<input type="text" id="f_note"></div>
+    </div>
+  </div>
+  <div class="sec"><div class="t"><span class="sw" style="background:var(--pipe)"></span>배관공사 일정</div>
+    <div class="fg three">
+      <div class="f">착공일<input type="date" id="f_pStart"></div>
+      <div class="f">준공일<input type="date" id="f_pEnd"><label class="chk"><input type="checkbox" id="f_pOpen">준공일 미정(진행중)</label></div>
+      <div class="f">배관시공업체<input type="text" id="f_pCont"></div>
+      <div class="f">배관연장합계(m)<input type="number" step="0.1" id="f_pLen"></div>
+      <div class="f">라인마크 설치일<input type="date" id="f_lm"><span class="hint" style="margin:0;">배관공사 착공일이 있을 때만 입력</span></div>
+    </div>
+  </div>
+  <div class="sec"><div class="t"><span class="sw" style="background:var(--pave)"></span>포장공사 일정</div>
+    <div class="fg three">
+      <div class="f">착공일<input type="date" id="f_vStart"></div>
+      <div class="f">준공일<input type="date" id="f_vEnd"><label class="chk"><input type="checkbox" id="f_vOpen">준공일 미정(진행중)</label></div>
+      <div class="f">포장시공업체 (선택)<input type="text" id="f_vCont"></div>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn danger sm" id="btnDelete" style="display:none;">삭제</button>
+    <div class="right">
+      <button class="btn secondary" data-close="ovlEdit">취소</button>
+      <button class="btn primary" id="btnSave">저장</button>
+    </div>
+  </div>
+</div></div>
+
+<!-- 날짜별 일정 목록 -->
+<div class="ovl" id="ovlDay"><div class="modal" style="max-width:560px;">
+  <h3 id="dayTitle">일정<button class="x" data-close="ovlDay">×</button></h3>
+  <div id="dayList"></div>
+  <div class="actions"><div class="right"><button class="btn primary sm" id="btnAddOnDay">이 날짜로 새 공사 등록</button></div></div>
+</div></div>
+
+<!-- 엑셀 업로드 -->
+<div class="ovl" id="ovlUp"><div class="modal">
+  <h3>엑셀 일괄 등록<button class="x" data-close="ovlUp">×</button></h3>
+  <div class="hint" style="margin:0 0 10px;">ERP "공사정보" 엑셀(.xls/.xlsx)을 올리면 각 행이 공사 1건으로 등록됩니다. 현재 선택된 사용자 <b id="upOwner" style="color:var(--blue);"></b> 소속으로 전체 건이 등록됩니다.</div>
+  <div class="drop" id="upDrop">여기에 엑셀 파일을 끌어다 놓거나 클릭해서 선택</div>
+  <input type="file" id="upFile" accept=".xls,.xlsx">
+  <div id="upMap" style="display:none;">
+    <div class="hint">아래 항목이 엑셀의 어느 열인지 확인/지정하세요 (자동 인식 결과가 미리 선택되어 있습니다).</div>
+    <div class="mapgrid" id="mapGrid"></div>
+    <div class="sum" id="upPreview"></div>
+    <div class="actions"><div class="right"><button class="btn secondary" data-close="ovlUp">취소</button><button class="btn primary" id="btnUpGo">등록 실행</button></div></div>
+  </div>
+  <div id="upResult" class="sum" style="display:none;"></div>
+</div></div>
+
+<!-- 중복 처리 -->
+<div class="ovl" id="ovlDup"><div class="modal" style="max-width:520px;">
+  <h3>중복 건 발견</h3>
+  <div class="sum" id="dupMsg"></div>
+  <div class="actions"><div class="right">
+    <button class="btn secondary" id="dupSkip">건너뛰기</button>
+    <button class="btn primary" id="dupOver">덮어쓰기</button>
+  </div></div>
+</div></div>
+
+<!-- 전체 목록 -->
+<div class="ovl" id="ovlList"><div class="modal" style="max-width:960px;">
+  <h3>전체 공사 목록 <span class="tag" id="listCount"></span><button class="x" data-close="ovlList">×</button></h3>
+  <div class="row" style="margin:0 0 6px;"><input type="text" id="listSearch" placeholder="공사명/주소/업체 검색" style="flex:1;"></div>
+  <div style="overflow-x:auto;"><table class="list" id="listTbl"></table></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const USERS = ['경주1','경주2','영천'];
+const CATS = ['소규모','일반공사','일반공사_MOU','일반공사_MOU인입','폐지'];
+const KEY = u => `constructionSchedule_${u}`;
+const USER_KEY = 'constructionSchedule_user';
+let user = localStorage.getItem(USER_KEY) || USERS[0];
+if(!USERS.includes(user)) user = USERS[0];
+let cur = new Date(); cur = new Date(cur.getFullYear(), cur.getMonth(), 1);
+let data = [];
+let editing = null; // 수정 중인 항목 id
+let dayFor = null;  // 날짜 목록 모달의 날짜
+
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2400); }
+const pad2 = n => String(n).padStart(2,'0');
+const ymd = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const todayStr = ymd(new Date());
+const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+/* ---------- 저장 (Firebase Firestore) ----------
+   다른 도우미들과 같은 Firebase 프로젝트를 쓴다. 컬렉션 "constructionSchedules"에 공사 1건 = 문서 1개
+   (문서 ID = 공사 id), owner 필드로 사용자(경주1/경주2/영천)를 구분한다. 어느 PC에서 열어도 같은 데이터가 보인다.
+   사용자 선택값만 이 브라우저(localStorage)에 기억한다. */
+var firebaseConfig = {
+  apiKey: "AIzaSyCvnzRE_Rokhee4Jzhb6A6Xutm2FAJVuLY",
+  authDomain: "patrol-log-27942.firebaseapp.com",
+  projectId: "patrol-log-27942",
+  storageBucket: "patrol-log-27942.firebasestorage.app",
+  messagingSenderId: "766088948342",
+  appId: "1:766088948342:web:90e8dafe49c38fc6a74d57"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const COL = 'constructionSchedules';
+const busy = on => { document.body.style.cursor = on ? 'progress' : ''; };
+
+async function load(){
+  busy(true);
+  try{
+    const snap = await db.collection(COL).where('owner','==',user).get();
+    data = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    data.forEach(p=>{ p.pipe=p.pipe||{}; p.pavement=p.pavement||{}; });
+  }catch(e){ data=[]; toast('불러오기 실패: '+e.message); }
+  busy(false);
+  await migrateLocalIfAny();
+}
+function stripId(p){ const o=Object.assign({},p); delete o.id; return o; }
+async function saveOne(p){ await db.collection(COL).doc(p.id).set(stripId(p)); }
+async function deleteOne(id){ await db.collection(COL).doc(id).delete(); }
+async function saveMany(list){ // 500건 단위 batch
+  for(let i=0;i<list.length;i+=400){
+    const b=db.batch(); list.slice(i,i+400).forEach(p=>b.set(db.collection(COL).doc(p.id), stripId(p))); await b.commit();
+  }
+}
+async function loadUser(u){ const snap=await db.collection(COL).where('owner','==',u).get(); return snap.docs.map(d=>Object.assign({id:d.id}, d.data())); }
+// 예전 버전(localStorage 저장)에서 쌓인 데이터가 이 브라우저에 있으면 한 번만 Firebase로 옮긴다.
+async function migrateLocalIfAny(){
+  let old=[]; try{ old=JSON.parse(localStorage.getItem(KEY(user))||'[]'); }catch(e){}
+  if(!Array.isArray(old) || !old.length) return;
+  if(!confirm(`이 브라우저에 예전 방식으로 저장된 ${user} 공사 ${old.length}건이 있습니다. Firebase로 옮길까요?\n(취소하면 다음에 다시 묻습니다)`)) return;
+  const ids=new Set(data.map(p=>p.id));
+  const list=old.filter(p=>!ids.has(p.id)).map(p=>{ if(!p.id) p.id=uid(); p.owner=user; return p; });
+  try{ await saveMany(list); localStorage.removeItem(KEY(user)); data=data.concat(list); renderCal(); toast(`${list.length}건을 Firebase로 옮겼습니다`); }
+  catch(e){ toast('이전 실패: '+e.message); }
+}
+function blank(){
+  const now=new Date().toISOString();
+  return { id:uid(), constructionId:'', category:'소규모', name:'', dong:'', address:'',
+    pipe:{startDate:null,endDate:null,contractor:'',totalLength:null,lineMarkDate:null},
+    pavement:{startDate:null,endDate:null,contractor:''}, note:'', owner:user, createdAt:now, updatedAt:now };
+}
+
+/* ---------- 사용자 탭 ---------- */
+function renderUserTabs(){
+  $('userTabs').innerHTML = USERS.map(u=>`<button class="${u===user?'on':''}" data-u="${u}">${u}</button>`).join('');
+  $('userTabs').querySelectorAll('button').forEach(b=>b.addEventListener('click',async()=>{
+    user=b.dataset.u; localStorage.setItem(USER_KEY,user); renderUserTabs(); data=[]; renderCal(); await load(); renderCal();
+  }));
+}
+
+/* ---------- 필터 ---------- */
+function filterState(){
+  const cats=new Set(), types=new Set();
+  $('filters').querySelectorAll('input[data-cat]').forEach(c=>{ if(c.checked) cats.add(c.dataset.cat); });
+  $('filters').querySelectorAll('input[data-type]').forEach(c=>{ if(c.checked) types.add(c.dataset.type); });
+  return {cats, types};
+}
+function catKey(c){ return CATS.includes(c) ? c : '기타'; }
+$('filters').addEventListener('change', renderCal);
+
+/* ---------- 이벤트 생성 (공사 -> 캘린더 요소) ---------- */
+// 한 공사에서 최대 3개 요소: 배관 기간(pipe), 라인마크(lm), 포장 기간(pave). 진행중은 오늘까지.
+function eventsOf(p){
+  const ev=[];
+  const ongoing = (s,e)=> s && !e;
+  if(p.pipe && p.pipe.startDate){
+    const og = ongoing(p.pipe.startDate, p.pipe.endDate);
+    let end = og ? (todayStr > p.pipe.startDate ? todayStr : p.pipe.startDate) : p.pipe.endDate;
+    if(end < p.pipe.startDate) end = p.pipe.startDate;
+    ev.push({type:'pipe', start:p.pipe.startDate, end, ongoing:og, p, label:p.name});
+  }
+  if(p.pipe && p.pipe.lineMarkDate){
+    ev.push({type:'lm', start:p.pipe.lineMarkDate, end:p.pipe.lineMarkDate, ongoing:false, p, label:'라인마크 '+p.name});
+  }
+  if(p.pavement && p.pavement.startDate){
+    const og = ongoing(p.pavement.startDate, p.pavement.endDate);
+    let end = og ? (todayStr > p.pavement.startDate ? todayStr : p.pavement.startDate) : p.pavement.endDate;
+    if(end < p.pavement.startDate) end = p.pavement.startDate;
+    ev.push({type:'pave', start:p.pavement.startDate, end, ongoing:og, p, label:'포장 '+p.name});
+  }
+  return ev;
+}
+function visibleEvents(){
+  const {cats,types} = filterState();
+  const out=[];
+  data.forEach(p=>{
+    if(!cats.has(catKey(p.category))) return;
+    eventsOf(p).forEach(e=>{ if(types.has(e.type)) out.push(e); });
+  });
+  return out;
+}
+
+/* ---------- 캘린더 렌더 ---------- */
+const MAX_LANES = 5; // 한 주에 세로로 쌓아 보여주는 최대 막대 수(초과분은 "+N건"으로 축약)
+function renderCal(){
+  const y=cur.getFullYear(), m=cur.getMonth();
+  $('ymLabel').textContent = `${y}년 ${m+1}월`;
+  const first = new Date(y,m,1), last = new Date(y,m+1,0);
+  const gridStart = new Date(y,m,1-first.getDay());
+  const nWeeks = Math.ceil((first.getDay()+last.getDate())/7);
+  const events = visibleEvents().sort((a,b)=> a.start<b.start?-1:a.start>b.start?1:(a.end>b.end?-1:1));
+  let html='';
+  for(let w=0;w<nWeeks;w++){
+    const days=[]; for(let i=0;i<7;i++){ const d=new Date(gridStart); d.setDate(gridStart.getDate()+w*7+i); days.push(d); }
+    const ws=ymd(days[0]), we=ymd(days[6]);
+    // 이 주에 걸친 이벤트를 레인에 배정(겹치지 않게 위에서부터)
+    const wk = events.filter(e=> e.start<=we && e.end>=ws).map(e=>{
+      const s = Math.max(0, days.findIndex(d=>ymd(d)===e.start)>=0 ? days.findIndex(d=>ymd(d)===e.start) : (e.start<ws?0:6));
+      const eIdx = days.findIndex(d=>ymd(d)===e.end);
+      const en = eIdx>=0 ? eIdx : (e.end>we?6:0);
+      return {e, s, en, contL:e.start<ws, contR:e.end>we};
+    });
+    const lanes=[]; // lanes[i] = 마지막 점유 열
+    wk.forEach(x=>{
+      let li = lanes.findIndex(lastCol=> lastCol < x.s);
+      if(li<0){ li=lanes.length; lanes.push(-1); }
+      lanes[li]=x.en; x.lane=li;
+    });
+    const hiddenPerDay = Array(7).fill(0);
+    wk.forEach(x=>{ if(x.lane>=MAX_LANES){ for(let c=x.s;c<=x.en;c++) hiddenPerDay[c]++; } });
+    const shownLanes = Math.min(lanes.length, MAX_LANES);
+    html += '<div class="week">';
+    days.forEach((d,i)=>{
+      const ds=ymd(d);
+      const cls=['day', d.getMonth()!==m?'other':'', ds===todayStr?'today':'', i===0?'sun':'', i===6?'sat':''].filter(Boolean).join(' ');
+      html += `<div class="${cls}" style="grid-column:${i+1};grid-row:1 / span ${shownLanes+3};" data-date="${ds}"><span class="n">${d.getDate()}</span></div>`;
+    });
+    wk.filter(x=>x.lane<MAX_LANES).forEach(x=>{
+      const e=x.e;
+      const cls=['bar',e.type,e.ongoing?'ongoing':'',x.contL?'contL':'',x.contR?'contR':'',e.p.category==='폐지'?'retired':''].filter(Boolean).join(' ');
+      html += `<div class="${cls}" style="grid-column:${x.s+1} / ${x.en+2};grid-row:${x.lane+2};" data-id="${e.p.id}" title="${esc(e.label)}${e.ongoing?' (진행중)':''}">${esc(e.label)}</div>`;
+    });
+    hiddenPerDay.forEach((n,i)=>{ if(n>0) html += `<div class="more" style="grid-column:${i+1};grid-row:${shownLanes+2};" data-date="${ymd(days[i])}" title="클릭하면 이 날짜의 전체 일정을 봅니다">+${n}건</div>`; });
+    html += `<div class="pad" style="grid-column:1/8;grid-row:${shownLanes+3};"></div>`;
+    html += '</div>';
+  }
+  $('calBody').innerHTML = html;
+  $('calBody').querySelectorAll('.bar').forEach(b=>b.addEventListener('click',ev=>{ ev.stopPropagation(); openEdit(b.dataset.id); }));
+  $('calBody').querySelectorAll('.day,.more').forEach(d=>d.addEventListener('click',()=>openDay(d.dataset.date)));
+  const n=data.length, og=data.filter(p=>(p.pipe&&p.pipe.startDate&&!p.pipe.endDate)||(p.pavement&&p.pavement.startDate&&!p.pavement.endDate)).length;
+  $('countInfo').textContent = `${user}: 등록 ${n}건 (진행중 ${og}건)`;
+}
+$('btnPrev').addEventListener('click',()=>{ cur=new Date(cur.getFullYear(),cur.getMonth()-1,1); renderCal(); });
+$('btnNext').addEventListener('click',()=>{ cur=new Date(cur.getFullYear(),cur.getMonth()+1,1); renderCal(); });
+$('btnToday').addEventListener('click',()=>{ const t=new Date(); cur=new Date(t.getFullYear(),t.getMonth(),1); renderCal(); });
+
+/* ---------- 모달 공통 ---------- */
+document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>$(b.dataset.close).classList.remove('show')));
+document.querySelectorAll('.ovl').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('show'); }));
+
+/* ---------- 날짜 목록 ---------- */
+function openDay(ds){
+  dayFor = ds;
+  const items = visibleEvents().filter(e=> e.start<=ds && e.end>=ds);
+  const [y,m,d]=ds.split('-');
+  $('dayTitle').innerHTML = `${+y}년 ${+m}월 ${+d}일 일정 <span class="tag">${items.length}건</span><button class="x" data-close="ovlDay">×</button>`;
+  $('dayTitle').querySelector('.x').addEventListener('click',()=>$('ovlDay').classList.remove('show'));
+  const col={pipe:'var(--pipe)',pave:'var(--pave)',lm:'var(--lm)'}, nm={pipe:'배관공사',pave:'포장공사',lm:'라인마크'};
+  $('dayList').innerHTML = items.length ? items.map(e=>`<div class="dayitem" data-id="${e.p.id}"><span class="sw" style="background:${col[e.type]}"></span>
+    <span class="nm"><b>${esc(e.p.name)}</b> <span class="hint" style="margin:0;display:inline;">${esc(e.p.category)} · ${nm[e.type]} ${e.type==='lm'?e.start:e.start+' ~ '+(e.ongoing?'진행중':e.end)}</span></span>
+    ${e.ongoing?'<span class="tag ongoing">진행중</span>':''}</div>`).join('') : '<div class="hint">이 날짜에 표시되는 일정이 없습니다.</div>';
+  $('dayList').querySelectorAll('.dayitem').forEach(x=>x.addEventListener('click',()=>{ $('ovlDay').classList.remove('show'); openEdit(x.dataset.id); }));
+  $('ovlDay').classList.add('show');
+}
+$('btnAddOnDay').addEventListener('click',()=>{ $('ovlDay').classList.remove('show'); openEdit(null, dayFor); });
+
+/* ---------- 등록/수정 폼 ---------- */
+function openEdit(id, presetDate){
+  editing = id;
+  const p = id ? data.find(x=>x.id===id) : blank();
+  if(!p){ toast('항목을 찾을 수 없습니다'); return; }
+  $('editTitle').innerHTML = (id?'공사 수정':'공사 등록')+'<button class="x" data-close="ovlEdit">×</button>';
+  $('editTitle').querySelector('.x').addEventListener('click',()=>$('ovlEdit').classList.remove('show'));
+  $('f_category').value = CATS.includes(p.category)?p.category:'기타';
+  $('f_cid').value=p.constructionId||''; $('f_name').value=p.name||''; $('f_dong').value=p.dong||''; $('f_addr').value=p.address||''; $('f_note').value=p.note||'';
+  $('f_owner').innerHTML = USERS.map(u=>`<option ${u===(p.owner||user)?'selected':''}>${u}</option>`).join('');
+  const pi=p.pipe||{}, pv=p.pavement||{};
+  $('f_pStart').value=pi.startDate||(presetDate&&!id?presetDate:''); $('f_pEnd').value=pi.endDate||''; $('f_pOpen').checked=!!(pi.startDate&&!pi.endDate);
+  $('f_pCont').value=pi.contractor||''; $('f_pLen').value=pi.totalLength==null?'':pi.totalLength; $('f_lm').value=pi.lineMarkDate||'';
+  $('f_vStart').value=pv.startDate||''; $('f_vEnd').value=pv.endDate||''; $('f_vOpen').checked=!!(pv.startDate&&!pv.endDate); $('f_vCont').value=pv.contractor||'';
+  $('btnDelete').style.display = id?'':'none';
+  syncOpen(); $('ovlEdit').classList.add('show'); $('f_name').focus();
+}
+function syncOpen(){
+  $('f_pEnd').disabled=$('f_pOpen').checked; if($('f_pOpen').checked) $('f_pEnd').value='';
+  $('f_vEnd').disabled=$('f_vOpen').checked; if($('f_vOpen').checked) $('f_vEnd').value='';
+  $('f_lm').disabled = !$('f_pStart').value; if(!$('f_pStart').value) $('f_lm').value='';
+}
+['f_pOpen','f_vOpen','f_pStart'].forEach(i=>$(i).addEventListener('change',syncOpen));
+$('btnAdd').addEventListener('click',()=>openEdit(null));
+$('btnSave').addEventListener('click',async()=>{
+  const name=$('f_name').value.trim(); if(!name){ toast('공사명을 입력하세요'); $('f_name').focus(); return; }
+  const pS=$('f_pStart').value||null, pE=$('f_pOpen').checked?null:($('f_pEnd').value||null);
+  const vS=$('f_vStart').value||null, vE=$('f_vOpen').checked?null:($('f_vEnd').value||null);
+  if(pS&&pE&&pE<pS){ toast('배관공사 준공일이 착공일보다 빠릅니다'); return; }
+  if(vS&&vE&&vE<vS){ toast('포장공사 준공일이 착공일보다 빠릅니다'); return; }
+  if(!pS && $('f_pEnd').value){ toast('배관공사 착공일을 입력하세요'); return; }
+  if(!vS && $('f_vEnd').value){ toast('포장공사 착공일을 입력하세요'); return; }
+  const now=new Date().toISOString();
+  const p = editing ? data.find(x=>x.id===editing) : blank();
+  Object.assign(p,{ constructionId:$('f_cid').value.trim(), category:$('f_category').value, name, dong:$('f_dong').value.trim(), address:$('f_addr').value.trim(), note:$('f_note').value.trim(), updatedAt:now,
+    pipe:{ startDate:pS, endDate:pE, contractor:$('f_pCont').value.trim(), totalLength:$('f_pLen').value===''?null:Number($('f_pLen').value), lineMarkDate:pS?($('f_lm').value||null):null },
+    pavement:{ startDate:vS, endDate:vE, contractor:$('f_vCont').value.trim()||null } });
+  const newOwner=$('f_owner').value;
+  p.owner=newOwner;
+  try{
+    busy(true); await saveOne(p); busy(false);
+    if(newOwner!==user){ data = data.filter(x=>x.id!==p.id); toast(`저장됨 · 소속을 ${newOwner}(으)로 변경했습니다`); } // 다른 사용자 소속이 되면 현재 화면에서 빠진다
+    else { if(!editing) data.push(p); toast('저장되었습니다'); }
+    $('ovlEdit').classList.remove('show'); renderCal();
+  }catch(e){ busy(false); toast('저장 실패: '+e.message); }
+});
+$('btnDelete').addEventListener('click',async()=>{
+  const p=data.find(x=>x.id===editing); if(!p) return;
+  if(!confirm(`"${p.name}" 공사를 삭제할까요?`)) return;
+  try{ busy(true); await deleteOne(editing); busy(false); data=data.filter(x=>x.id!==editing); $('ovlEdit').classList.remove('show'); renderCal(); toast('삭제되었습니다'); }
+  catch(e){ busy(false); toast('삭제 실패: '+e.message); }
+});
+
+/* ---------- 엑셀 업로드 ---------- */
+const FIELDS = [
+  {key:'category', label:'공사구분', alias:['공사구분','구분'], req:false},
+  {key:'constructionId', label:'공사ID', alias:['공사id','공사번호','공사아이디'], req:false},
+  {key:'name', label:'공사명 *', alias:['공사명','공사건명','건명'], req:true},
+  {key:'dong', label:'법정동', alias:['법정동','읍면동','동'], req:false},
+  {key:'address', label:'주소', alias:['주소','상세주소','지번'], req:false},
+  {key:'pStart', label:'공사착공일 *', alias:['공사착공일','착공일','배관착공일','착공'], req:true},
+  {key:'pEnd', label:'공사준공일', alias:['공사준공일','준공일','배관준공일','준공'], req:false},
+  {key:'pCont', label:'배관시공업체', alias:['배관시공업체','시공업체','배관업체','업체'], req:false},
+  {key:'pLen', label:'배관연장합계', alias:['배관연장합계','배관연장','연장합계','연장'], req:false},
+];
+let upRows=[], upHeaders=[], upFileName='';
+const normH = s => String(s==null?'':s).replace(/\s+/g,'').toLowerCase();
+function bindDrop(drop, inp, cb){
+  drop.addEventListener('click',()=>inp.click());
+  drop.addEventListener('dragover',e=>{ e.preventDefault(); drop.classList.add('drag'); });
+  drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+  drop.addEventListener('drop',e=>{ e.preventDefault(); drop.classList.remove('drag'); if(e.dataTransfer.files[0]) cb(e.dataTransfer.files[0]); });
+  inp.addEventListener('change',()=>{ if(inp.files[0]) cb(inp.files[0]); inp.value=''; });
+}
+$('btnUpload').addEventListener('click',()=>{
+  $('upOwner').textContent=user; $('upMap').style.display='none'; $('upResult').style.display='none'; $('upDrop').style.display='';
+  $('ovlUp').classList.add('show');
+});
+bindDrop($('upDrop'), $('upFile'), async file=>{
+  try{
+    const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array',cellDates:false});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+    // 헤더 행 자동 인식: 상위 15행 중 '공사명' 또는 '공사id'가 들어있는 첫 행
+    let hr=-1;
+    for(let r=0;r<Math.min(15,rows.length);r++){ const n=rows[r].map(normH); if(n.some(v=>v==='공사명'||v==='공사id')){ hr=r; break; } }
+    if(hr<0){ hr=0; }
+    upHeaders = rows[hr].map(v=>String(v==null?'':v).trim());
+    upRows = rows.slice(hr+1).filter(r=>r.some(v=>v!=='' && v!=null));
+    upFileName=file.name;
+    if(!upRows.length){ toast('데이터 행이 없습니다'); return; }
+    // 자동 매핑
+    $('mapGrid').innerHTML = FIELDS.map(f=>{
+      let idx = -1;
+      for(const a of f.alias){ idx = upHeaders.findIndex(h=>normH(h)===normH(a)); if(idx>=0) break; }
+      if(idx<0) for(const a of f.alias){ idx = upHeaders.findIndex(h=>normH(h).includes(normH(a))); if(idx>=0) break; }
+      const opts = ['<option value="">(사용 안 함)</option>'].concat(upHeaders.map((h,i)=>`<option value="${i}" ${i===idx?'selected':''}>${esc(h||('열'+(i+1)))}</option>`)).join('');
+      return `<div>${f.label}</div><select data-key="${f.key}">${opts}</select>`;
+    }).join('');
+    updateUpPreview();
+    $('mapGrid').querySelectorAll('select').forEach(s=>s.addEventListener('change',updateUpPreview));
+    $('upDrop').style.display='none'; $('upMap').style.display='';
+  }catch(e){ toast('엑셀 읽기 실패: '+e.message); }
+});
+function mapping(){ const m={}; $('mapGrid').querySelectorAll('select').forEach(s=>{ m[s.dataset.key]= s.value===''?-1:Number(s.value); }); return m; }
+function parseDate(v){
+  if(v==null||v==='') return null;
+  if(typeof v==='number'){ // 엑셀 시리얼
+    const d = XLSX.SSF.parse_date_code(v); if(!d) return null;
+    return `${d.y}-${pad2(d.m)}-${pad2(d.d)}`;
+  }
+  if(v instanceof Date && !isNaN(v)) return ymd(v);
+  const m=String(v).trim().match(/(\d{4})[.\-\/년]\s*(\d{1,2})[.\-\/월]\s*(\d{1,2})/);
+  return m ? `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` : null;
+}
+function rowToProject(r, m){
+  const g = k => m[k]>=0 ? r[m[k]] : '';
+  const p = blank();
+  p.constructionId = g('constructionId')===''?'':String(g('constructionId')).replace(/\.0$/,'').trim();
+  p.category = String(g('category')||'').trim() || '소규모';
+  p.name = String(g('name')||'').trim();
+  p.dong = String(g('dong')||'').trim(); p.address = String(g('address')||'').trim();
+  p.pipe.startDate = parseDate(g('pStart')); p.pipe.endDate = parseDate(g('pEnd'));
+  p.pipe.contractor = String(g('pCont')||'').trim();
+  const len = g('pLen'); p.pipe.totalLength = (len===''||len==null||isNaN(Number(len))) ? null : Number(len);
+  return p;
+}
+function updateUpPreview(){
+  const m=mapping();
+  const miss = FIELDS.filter(f=>f.req && m[f.key]<0).map(f=>f.label.replace(' *',''));
+  $('btnUpGo').disabled = miss.length>0;
+  const sample = upRows.slice(0,3).map(r=>rowToProject(r,m));
+  $('upPreview').innerHTML = `<b>${esc(upFileName)}</b> · 데이터 <b>${upRows.length}</b>행` + (miss.length?` · <span style="color:var(--err)">필수 항목 미지정: ${miss.join(', ')}</span>`:'')
+    + '<div class="hint">미리보기: '+sample.map(p=>`${esc(p.name)} (${p.pipe.startDate||'착공일?'} ~ ${p.pipe.endDate||'미정'})`).join(' / ')+'</div>';
+}
+$('btnUpGo').addEventListener('click', async ()=>{
+  const m=mapping();
+  const list = upRows.map(r=>rowToProject(r,m)).filter(p=>p.name);
+  if(!list.length){ toast('공사명이 있는 행이 없습니다'); return; }
+  if(!confirm(`${list.length}건을 현재 사용자 "${user}" 소속으로 등록합니다. 계속할까요?`)) return;
+  const byId = new Map(data.filter(p=>p.constructionId).map(p=>[p.constructionId,p]));
+  const dups = list.filter(p=>p.constructionId && byId.has(p.constructionId));
+  let mode='skip';
+  if(dups.length){
+    mode = await askDup(dups);
+    if(!mode) return;
+  }
+  let added=0, over=0, skipped=0, noDate=0;
+  const toWrite=[], toPush=[];
+  list.forEach(p=>{
+    if(!p.pipe.startDate) noDate++;
+    const ex = p.constructionId ? byId.get(p.constructionId) : null;
+    if(ex){
+      if(mode==='over'){ Object.assign(ex,{category:p.category,name:p.name,dong:p.dong,address:p.address,updatedAt:new Date().toISOString(),
+        pipe:Object.assign({},ex.pipe,{startDate:p.pipe.startDate,endDate:p.pipe.endDate,contractor:p.pipe.contractor,totalLength:p.pipe.totalLength})}); toWrite.push(ex); over++; }
+      else skipped++;
+    } else { p.owner=user; toWrite.push(p); toPush.push(p); if(p.constructionId) byId.set(p.constructionId,p); added++; }
+  });
+  try{ busy(true); await saveMany(toWrite); busy(false); }
+  catch(e){ busy(false); toast('Firebase 저장 실패: '+e.message); return; }
+  data=data.concat(toPush); renderCal();
+  $('upMap').style.display='none'; $('upResult').style.display='';
+  $('upResult').innerHTML = `<b>등록 완료</b><br>신규 등록 <b>${added}</b>건 · 중복 ${mode==='over'?'덮어쓰기':'건너뛰기'} <b>${mode==='over'?over:skipped}</b>건`
+    + (noDate?`<br><span style="color:var(--err)">착공일을 인식하지 못한 건 ${noDate}건 (캘린더에 표시되지 않으니 상세에서 날짜를 입력하세요)</span>`:'')
+    + `<div class="actions"><div class="right"><button class="btn primary" data-close="ovlUp">닫기</button></div></div>`;
+  $('upResult').querySelector('[data-close]').addEventListener('click',()=>$('ovlUp').classList.remove('show'));
+});
+function askDup(dups){
+  return new Promise(res=>{
+    $('dupMsg').innerHTML = `이미 등록된 공사ID <b>${dups.length}</b>건이 있습니다.<div class="hint" style="max-height:120px;overflow:auto;">${dups.slice(0,20).map(p=>esc(p.constructionId+' '+p.name)).join('<br>')}${dups.length>20?'<br>…':''}</div>
+      <b>덮어쓰기</b>: 기본정보·배관공사 일정을 엑셀 값으로 갱신(라인마크·포장공사·비고는 유지)<br><b>건너뛰기</b>: 기존 건 유지, 신규 건만 등록`;
+    $('ovlDup').classList.add('show');
+    const done=v=>{ $('ovlDup').classList.remove('show'); $('dupSkip').onclick=null; $('dupOver').onclick=null; res(v); };
+    $('dupSkip').onclick=()=>done('skip'); $('dupOver').onclick=()=>done('over');
+  });
+}
+
+/* ---------- 전체 목록 ---------- */
+function renderList(){
+  const q=normH($('listSearch').value);
+  const rows=data.filter(p=>!q || normH(p.name+p.address+p.dong+(p.pipe&&p.pipe.contractor||'')+(p.constructionId||'')).includes(q))
+    .sort((a,b)=> (b.pipe&&b.pipe.startDate||'') < (a.pipe&&a.pipe.startDate||'') ? -1 : 1);
+  $('listCount').textContent = `${rows.length}건`;
+  const st = (s,e)=> !s?'-': (e? `${s} ~ ${e}` : `${s} ~ <span class="tag ongoing">진행중</span>`);
+  $('listTbl').innerHTML = `<tr><th>구분</th><th>공사ID</th><th>공사명</th><th>주소</th><th>배관공사</th><th>업체</th><th>연장(m)</th><th>라인마크</th><th>포장공사</th><th></th></tr>`+
+    rows.map(p=>`<tr><td><span class="tag ${p.category==='폐지'?'retired':''}">${esc(p.category)}</span></td><td>${esc(p.constructionId||'')}</td><td class="l"><b>${esc(p.name)}</b></td><td class="l">${esc((p.dong?p.dong+' ':'')+(p.address||''))}</td>
+      <td>${st(p.pipe.startDate,p.pipe.endDate)}</td><td>${esc(p.pipe.contractor||'')}</td><td>${p.pipe.totalLength==null?'':p.pipe.totalLength}</td><td>${p.pipe.lineMarkDate||''}</td><td>${st(p.pavement.startDate,p.pavement.endDate)}</td>
+      <td><button class="btn secondary sm" data-id="${p.id}">수정</button></td></tr>`).join('');
+  $('listTbl').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ $('ovlList').classList.remove('show'); openEdit(b.dataset.id); }));
+}
+$('btnList').addEventListener('click',()=>{ $('listSearch').value=''; renderList(); $('ovlList').classList.add('show'); });
+$('listSearch').addEventListener('input',renderList);
+
+/* ---------- 백업/복원 ---------- */
+$('btnExport').addEventListener('click',async()=>{
+  try{
+    busy(true); const all={}; for(const u of USERS) all[u]=await loadUser(u); busy(false);
+    const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`공사일정_백업_${todayStr}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+  }catch(e){ busy(false); toast('내보내기 실패: '+e.message); }
+});
+$('btnImport').addEventListener('click',()=>$('importFile').click());
+$('importFile').addEventListener('change',async()=>{
+  const f=$('importFile').files[0]; $('importFile').value=''; if(!f) return;
+  try{
+    const obj=JSON.parse(await f.text());
+    const users=USERS.filter(u=>Array.isArray(obj[u]));
+    if(!users.length) throw new Error('형식이 맞지 않습니다');
+    if(!confirm(`백업 파일의 데이터(${users.map(u=>u+' '+obj[u].length+'건').join(', ')})를 Firebase에 등록합니다(같은 id는 덮어쓰기). 계속할까요?`)) return;
+    const list=[]; users.forEach(u=>obj[u].forEach(p=>{ if(!p.id) p.id=uid(); p.owner=u; list.push(p); }));
+    busy(true); await saveMany(list); busy(false); await load(); renderCal(); toast(`${list.length}건 복원되었습니다`);
+  }catch(e){ busy(false); toast('가져오기 실패: '+e.message); }
+});
+$('btnReload').addEventListener('click',async()=>{ await load(); renderCal(); toast('새로고침했습니다'); });
+
+/* ---------- 시작 ---------- */
+renderUserTabs(); renderCal();
+load().then(renderCal);
+</script>
+</body>
+</html>

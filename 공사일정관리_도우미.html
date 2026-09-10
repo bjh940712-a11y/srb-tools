@@ -11,7 +11,7 @@
   :root{
     --bg:#f7f7f5; --card:#fff; --border:#e3e1dc; --text:#2b2a27; --muted:#8a8780;
     --accent:#c15f3c; --accent-dark:#a34e30; --ok:#4a7c59; --err:#b3432b; --blue:#3b6ea5;
-    --pipe:#3b6ea5; --pipe-bg:#dce8f5; --pave:#4a7c59; --pave-bg:#dff0e3; --lm:#c15f3c; --lm-bg:#fbe8e1;
+    --pipe:#3b6ea5; --pipe-bg:#dce8f5; --pave:#4a7c59; --pave-bg:#dff0e3; --tpave:#9a9a2e; --tpave-bg:#f1f1d2; --lm:#c15f3c; --lm-bg:#fbe8e1;
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;
@@ -83,7 +83,8 @@
   .bar{font-size:11px;line-height:1.25;padding:2px 6px;margin:1px 2px;border-radius:5px;white-space:nowrap;overflow:hidden;
     text-overflow:ellipsis;cursor:pointer;border-left:3px solid;position:relative;z-index:1;}
   .bar.pipe{background:var(--pipe-bg);border-color:var(--pipe);color:#25476b;}
-  .bar.pave{background:var(--pave-bg);border-color:var(--pave);color:#2e5238;}
+  .bar.pave_c{background:var(--pave-bg);border-color:var(--pave);color:#2e5238;}
+  .bar.pave_t{background:var(--tpave-bg);border-color:var(--tpave);color:#5a5a14;}
   .bar.lm{background:var(--lm-bg);border-color:var(--lm);color:#8a4028;font-weight:700;}
   .bar.ongoing{background-image:repeating-linear-gradient(135deg,transparent 0 6px,rgba(255,255,255,.55) 6px 9px);}
   .bar.ongoing::after{content:'›';position:absolute;right:5px;top:0;font-weight:800;}
@@ -188,7 +189,9 @@
       <span style="color:var(--muted);font-weight:700;margin-left:8px;">일정</span>
       <label><span class="sw" style="background:var(--pipe)"></span><input type="checkbox" data-type="pipe" checked>배관공사</label>
       <label><span class="sw" style="background:var(--lm)"></span><input type="checkbox" data-type="lm" checked>라인마크</label>
-      <label><span class="sw" style="background:var(--pave)"></span><input type="checkbox" data-type="pave" checked>포장공사</label>
+      <label><span class="sw" style="background:var(--pave)"></span><input type="checkbox" data-type="pave_c" checked>절삭포장</label>
+      <label><span class="sw" style="background:var(--tpave)"></span><input type="checkbox" data-type="pave_t" checked>임시포장</label>
+      <label style="margin-left:8px;"><input type="checkbox" id="showOngoing">준공일 미정(진행중) 공사도 표시</label>
     </div>
     <div class="cal">
       <div class="dow"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div>
@@ -196,9 +199,10 @@
     </div>
     <div class="legend">
       <span><i style="background:var(--pipe-bg);border-color:var(--pipe)"></i>배관공사 기간</span>
-      <span><i style="background:var(--pave-bg);border-color:var(--pave)"></i>포장공사 기간</span>
+      <span><i style="background:var(--pave-bg);border-color:var(--pave)"></i>절삭포장 기간</span>
+      <span><i style="background:var(--tpave-bg);border-color:var(--tpave)"></i>임시포장 기간</span>
       <span><i style="background:var(--lm-bg);border-color:var(--lm)"></i>라인마크 설치일</span>
-      <span><i class="bar ongoing" style="background:var(--pipe-bg);border-color:var(--pipe);padding:0;margin:0;"></i>빗금 = 준공일 미정(진행중, 오늘까지 표시)</span>
+      <span><i class="bar ongoing" style="background:var(--pipe-bg);border-color:var(--pipe);padding:0;margin:0;"></i>빗금 = 준공일 미정(옵션을 켰을 때만, 오늘까지 표시)</span>
     </div>
     <div class="hint">날짜 칸을 누르면 그날의 일정 목록, 막대를 누르면 공사 상세/수정 창이 열립니다. 다른 PC에서 수정한 내용은 ↻ 버튼(또는 새로고침)으로 반영됩니다. 아래 JSON 내보내기로 전체 백업을 받아 둘 수 있습니다.</div>
     <div class="row" style="margin-top:8px;">
@@ -213,6 +217,12 @@
 <!-- 공사 등록/수정 -->
 <div class="ovl" id="ovlEdit"><div class="modal">
   <h3 id="editTitle">공사 등록<button class="x" data-close="ovlEdit">×</button></h3>
+  <div class="sec" id="pickSec" style="background:#eef4fa;border-color:#c9d9ea;"><div class="t">등록된 공사 불러오기 <span class="hint" style="margin:0;font-weight:400;">엑셀로 올린 공사에 포장공사·라인마크 일정을 추가하려면 여기서 골라 여세요</span></div>
+    <div class="fg">
+      <div class="f">검색 (공사ID / 공사명 / 주소)<input type="text" id="f_pickSearch" placeholder="예: 2026079929 또는 금호읍"></div>
+      <div class="f">공사 선택<select id="f_pick"><option value="">— 선택 —</option></select></div>
+    </div>
+  </div>
   <div class="sec"><div class="t">기본 정보</div>
     <div class="fg">
       <div class="f">공사구분<select id="f_category"><option>소규모</option><option>일반공사</option><option>일반공사_MOU</option><option>일반공사_MOU인입</option><option>폐지</option><option>기타</option></select></div>
@@ -235,8 +245,13 @@
   </div>
   <div class="sec"><div class="t"><span class="sw" style="background:var(--pave)"></span>포장공사 일정</div>
     <div class="fg three">
-      <div class="f">착공일<input type="date" id="f_vStart"></div>
-      <div class="f">준공일<input type="date" id="f_vEnd"><label class="chk"><input type="checkbox" id="f_vOpen">준공일 미정(진행중)</label></div>
+      <div class="f full" style="font-weight:700;color:var(--text);"><span><span class="sw" style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--tpave);margin-right:5px;"></span>임시포장</span></div>
+      <div class="f">임시포장 착공일<input type="date" id="f_tStart"></div>
+      <div class="f">임시포장 준공일<input type="date" id="f_tEnd"><label class="chk"><input type="checkbox" id="f_tOpen">준공일 미정(진행중)</label></div>
+      <div class="f"></div>
+      <div class="f full" style="font-weight:700;color:var(--text);margin-top:4px;"><span><span class="sw" style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--pave);margin-right:5px;"></span>절삭포장</span></div>
+      <div class="f">절삭포장 착공일<input type="date" id="f_vStart"></div>
+      <div class="f">절삭포장 준공일<input type="date" id="f_vEnd"><label class="chk"><input type="checkbox" id="f_vOpen">준공일 미정(진행중)</label></div>
       <div class="f">포장시공업체 (선택)<input type="text" id="f_vCont"></div>
     </div>
   </div>
@@ -332,7 +347,7 @@ async function load(){
   try{
     const snap = await db.collection(COL).where('owner','==',user).get();
     data = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
-    data.forEach(p=>{ p.pipe=p.pipe||{}; p.pavement=p.pavement||{}; });
+    data.forEach(normalize);
   }catch(e){ data=[]; toast('불러오기 실패: '+e.message); }
   busy(false);
   await migrateLocalIfAny();
@@ -352,7 +367,7 @@ async function migrateLocalIfAny(){
   if(!Array.isArray(old) || !old.length) return;
   if(!confirm(`이 브라우저에 예전 방식으로 저장된 ${user} 공사 ${old.length}건이 있습니다. Firebase로 옮길까요?\n(취소하면 다음에 다시 묻습니다)`)) return;
   const ids=new Set(data.map(p=>p.id));
-  const list=old.filter(p=>!ids.has(p.id)).map(p=>{ if(!p.id) p.id=uid(); p.owner=user; return p; });
+  const list=old.filter(p=>!ids.has(p.id)).map(p=>{ if(!p.id) p.id=uid(); p.owner=user; return normalize(p); });
   try{ await saveMany(list); localStorage.removeItem(KEY(user)); data=data.concat(list); renderCal(); toast(`${list.length}건을 Firebase로 옮겼습니다`); }
   catch(e){ toast('이전 실패: '+e.message); }
 }
@@ -360,7 +375,20 @@ function blank(){
   const now=new Date().toISOString();
   return { id:uid(), constructionId:'', category:'소규모', name:'', dong:'', address:'',
     pipe:{startDate:null,endDate:null,contractor:'',totalLength:null,lineMarkDate:null},
-    pavement:{startDate:null,endDate:null,contractor:''}, note:'', owner:user, createdAt:now, updatedAt:now };
+    // 포장공사는 임시포장(temp)과 절삭포장(cut) 두 일정을 따로 가진다.
+    pavement:{temp:{startDate:null,endDate:null}, cut:{startDate:null,endDate:null}, contractor:''},
+    note:'', owner:user, createdAt:now, updatedAt:now };
+}
+// 저장된 문서의 빠진 필드를 채우고, 예전 구조(pavement.startDate/endDate 단일 일정)는 절삭포장으로 옮긴다.
+function normalize(p){
+  p.pipe = p.pipe || {};
+  const pv = p.pavement || {};
+  if(!pv.temp) pv.temp = {startDate:null,endDate:null};
+  if(!pv.cut)  pv.cut  = {startDate:(pv.startDate||null), endDate:(pv.endDate||null)};
+  delete pv.startDate; delete pv.endDate;
+  if(pv.contractor==null) pv.contractor='';
+  p.pavement = pv;
+  return p;
 }
 
 /* ---------- 사용자 탭 ---------- */
@@ -382,33 +410,32 @@ function catKey(c){ return CATS.includes(c) ? c : '기타'; }
 $('filters').addEventListener('change', renderCal);
 
 /* ---------- 이벤트 생성 (공사 -> 캘린더 요소) ---------- */
-// 한 공사에서 최대 3개 요소: 배관 기간(pipe), 라인마크(lm), 포장 기간(pave). 진행중은 오늘까지.
-function eventsOf(p){
+// 한 공사에서 최대 4개 요소: 배관 기간(pipe), 라인마크(lm), 임시포장(pave_t), 절삭포장(pave_c).
+// 준공일 미정(진행중) 기간은 기본적으로 캘린더에 올리지 않고, "준공일 미정 공사도 표시" 옵션을 켰을 때만
+// 오늘까지 빗금 막대로 보여준다(ERP에서 준공일 없이 넘어온 건이 연말까지 칸을 다 차지하는 것을 막기 위함).
+function periodEvent(type, seg, p, label, showOngoing){
+  if(!seg || !seg.startDate) return null;
+  const og = !seg.endDate;
+  if(og && !showOngoing) return null;
+  let end = og ? (todayStr > seg.startDate ? todayStr : seg.startDate) : seg.endDate;
+  if(end < seg.startDate) end = seg.startDate;
+  return {type, start:seg.startDate, end, ongoing:og, p, label};
+}
+function eventsOf(p, showOngoing){
   const ev=[];
-  const ongoing = (s,e)=> s && !e;
-  if(p.pipe && p.pipe.startDate){
-    const og = ongoing(p.pipe.startDate, p.pipe.endDate);
-    let end = og ? (todayStr > p.pipe.startDate ? todayStr : p.pipe.startDate) : p.pipe.endDate;
-    if(end < p.pipe.startDate) end = p.pipe.startDate;
-    ev.push({type:'pipe', start:p.pipe.startDate, end, ongoing:og, p, label:p.name});
-  }
-  if(p.pipe && p.pipe.lineMarkDate){
-    ev.push({type:'lm', start:p.pipe.lineMarkDate, end:p.pipe.lineMarkDate, ongoing:false, p, label:'라인마크 '+p.name});
-  }
-  if(p.pavement && p.pavement.startDate){
-    const og = ongoing(p.pavement.startDate, p.pavement.endDate);
-    let end = og ? (todayStr > p.pavement.startDate ? todayStr : p.pavement.startDate) : p.pavement.endDate;
-    if(end < p.pavement.startDate) end = p.pavement.startDate;
-    ev.push({type:'pave', start:p.pavement.startDate, end, ongoing:og, p, label:'포장 '+p.name});
-  }
+  const e1 = periodEvent('pipe', p.pipe, p, p.name, showOngoing); if(e1) ev.push(e1);
+  if(p.pipe && p.pipe.lineMarkDate) ev.push({type:'lm', start:p.pipe.lineMarkDate, end:p.pipe.lineMarkDate, ongoing:false, p, label:'라인마크 '+p.name});
+  const e2 = periodEvent('pave_t', p.pavement&&p.pavement.temp, p, '임시포장 '+p.name, showOngoing); if(e2) ev.push(e2);
+  const e3 = periodEvent('pave_c', p.pavement&&p.pavement.cut,  p, '절삭포장 '+p.name, showOngoing); if(e3) ev.push(e3);
   return ev;
 }
 function visibleEvents(){
   const {cats,types} = filterState();
+  const showOngoing = $('showOngoing').checked;
   const out=[];
   data.forEach(p=>{
     if(!cats.has(catKey(p.category))) return;
-    eventsOf(p).forEach(e=>{ if(types.has(e.type)) out.push(e); });
+    eventsOf(p, showOngoing).forEach(e=>{ if(types.has(e.type)) out.push(e); });
   });
   return out;
 }
@@ -460,8 +487,9 @@ function renderCal(){
   $('calBody').innerHTML = html;
   $('calBody').querySelectorAll('.bar').forEach(b=>b.addEventListener('click',ev=>{ ev.stopPropagation(); openEdit(b.dataset.id); }));
   $('calBody').querySelectorAll('.day,.more').forEach(d=>d.addEventListener('click',()=>openDay(d.dataset.date)));
-  const n=data.length, og=data.filter(p=>(p.pipe&&p.pipe.startDate&&!p.pipe.endDate)||(p.pavement&&p.pavement.startDate&&!p.pavement.endDate)).length;
-  $('countInfo').textContent = `${user}: 등록 ${n}건 (진행중 ${og}건)`;
+  const isOg = s=> s && s.startDate && !s.endDate;
+  const n=data.length, og=data.filter(p=> isOg(p.pipe) || isOg(p.pavement.temp) || isOg(p.pavement.cut)).length;
+  $('countInfo').textContent = `${user}: 등록 ${n}건 (준공일 미정 ${og}건${$('showOngoing').checked?'':' - 캘린더 미표시'})`;
 }
 $('btnPrev').addEventListener('click',()=>{ cur=new Date(cur.getFullYear(),cur.getMonth()-1,1); renderCal(); });
 $('btnNext').addEventListener('click',()=>{ cur=new Date(cur.getFullYear(),cur.getMonth()+1,1); renderCal(); });
@@ -478,7 +506,7 @@ function openDay(ds){
   const [y,m,d]=ds.split('-');
   $('dayTitle').innerHTML = `${+y}년 ${+m}월 ${+d}일 일정 <span class="tag">${items.length}건</span><button class="x" data-close="ovlDay">×</button>`;
   $('dayTitle').querySelector('.x').addEventListener('click',()=>$('ovlDay').classList.remove('show'));
-  const col={pipe:'var(--pipe)',pave:'var(--pave)',lm:'var(--lm)'}, nm={pipe:'배관공사',pave:'포장공사',lm:'라인마크'};
+  const col={pipe:'var(--pipe)',pave_c:'var(--pave)',pave_t:'var(--tpave)',lm:'var(--lm)'}, nm={pipe:'배관공사',pave_c:'절삭포장',pave_t:'임시포장',lm:'라인마크'};
   $('dayList').innerHTML = items.length ? items.map(e=>`<div class="dayitem" data-id="${e.p.id}"><span class="sw" style="background:${col[e.type]}"></span>
     <span class="nm"><b>${esc(e.p.name)}</b> <span class="hint" style="margin:0;display:inline;">${esc(e.p.category)} · ${nm[e.type]} ${e.type==='lm'?e.start:e.start+' ~ '+(e.ongoing?'진행중':e.end)}</span></span>
     ${e.ongoing?'<span class="tag ongoing">진행중</span>':''}</div>`).join('') : '<div class="hint">이 날짜에 표시되는 일정이 없습니다.</div>';
@@ -497,33 +525,50 @@ function openEdit(id, presetDate){
   $('f_category').value = CATS.includes(p.category)?p.category:'기타';
   $('f_cid').value=p.constructionId||''; $('f_name').value=p.name||''; $('f_dong').value=p.dong||''; $('f_addr').value=p.address||''; $('f_note').value=p.note||'';
   $('f_owner').innerHTML = USERS.map(u=>`<option ${u===(p.owner||user)?'selected':''}>${u}</option>`).join('');
-  const pi=p.pipe||{}, pv=p.pavement||{};
+  const pi=p.pipe||{}, pv=normalize(p).pavement;
   $('f_pStart').value=pi.startDate||(presetDate&&!id?presetDate:''); $('f_pEnd').value=pi.endDate||''; $('f_pOpen').checked=!!(pi.startDate&&!pi.endDate);
   $('f_pCont').value=pi.contractor||''; $('f_pLen').value=pi.totalLength==null?'':pi.totalLength; $('f_lm').value=pi.lineMarkDate||'';
-  $('f_vStart').value=pv.startDate||''; $('f_vEnd').value=pv.endDate||''; $('f_vOpen').checked=!!(pv.startDate&&!pv.endDate); $('f_vCont').value=pv.contractor||'';
+  $('f_tStart').value=pv.temp.startDate||''; $('f_tEnd').value=pv.temp.endDate||''; $('f_tOpen').checked=!!(pv.temp.startDate&&!pv.temp.endDate);
+  $('f_vStart').value=pv.cut.startDate||'';  $('f_vEnd').value=pv.cut.endDate||'';  $('f_vOpen').checked=!!(pv.cut.startDate&&!pv.cut.endDate);
+  $('f_vCont').value=pv.contractor||'';
   $('btnDelete').style.display = id?'':'none';
-  syncOpen(); $('ovlEdit').classList.add('show'); $('f_name').focus();
+  // "등록된 공사 불러오기" 선택기: 현재 사용자의 공사 목록을 채운다(수정 중인 건이 있으면 그 건을 선택 상태로)
+  $('f_pickSearch').value=''; fillPick(id||'');
+  syncOpen(); $('ovlEdit').classList.add('show'); (id?$('f_pStart'):$('f_pickSearch')).focus();
 }
+// 선택기 목록: 검색어(공사ID/공사명/주소)로 걸러서 최근 착공일 순으로 보여준다.
+function fillPick(selectedId){
+  const q=normH($('f_pickSearch').value);
+  const list=data.filter(p=>!q || normH((p.constructionId||'')+(p.name||'')+(p.dong||'')+(p.address||'')).includes(q))
+    .sort((a,b)=> ((b.pipe&&b.pipe.startDate)||'') < ((a.pipe&&a.pipe.startDate)||'') ? -1 : 1).slice(0,300);
+  $('f_pick').innerHTML = '<option value="">— 선택 —</option>' + list.map(p=>`<option value="${p.id}" ${p.id===selectedId?'selected':''}>${esc((p.constructionId?p.constructionId+' · ':'')+p.name+(p.pipe&&p.pipe.startDate?' ('+p.pipe.startDate+')':''))}</option>`).join('');
+}
+$('f_pickSearch').addEventListener('input',()=>fillPick(editing||''));
+$('f_pick').addEventListener('change',()=>{ const id=$('f_pick').value; if(id && id!==editing){ const q=$('f_pickSearch').value; openEdit(id); $('f_pickSearch').value=q; fillPick(id); } });
 function syncOpen(){
   $('f_pEnd').disabled=$('f_pOpen').checked; if($('f_pOpen').checked) $('f_pEnd').value='';
+  $('f_tEnd').disabled=$('f_tOpen').checked; if($('f_tOpen').checked) $('f_tEnd').value='';
   $('f_vEnd').disabled=$('f_vOpen').checked; if($('f_vOpen').checked) $('f_vEnd').value='';
   $('f_lm').disabled = !$('f_pStart').value; if(!$('f_pStart').value) $('f_lm').value='';
 }
-['f_pOpen','f_vOpen','f_pStart'].forEach(i=>$(i).addEventListener('change',syncOpen));
+['f_pOpen','f_tOpen','f_vOpen','f_pStart'].forEach(i=>$(i).addEventListener('change',syncOpen));
 $('btnAdd').addEventListener('click',()=>openEdit(null));
 $('btnSave').addEventListener('click',async()=>{
   const name=$('f_name').value.trim(); if(!name){ toast('공사명을 입력하세요'); $('f_name').focus(); return; }
   const pS=$('f_pStart').value||null, pE=$('f_pOpen').checked?null:($('f_pEnd').value||null);
+  const tS=$('f_tStart').value||null, tE=$('f_tOpen').checked?null:($('f_tEnd').value||null);
   const vS=$('f_vStart').value||null, vE=$('f_vOpen').checked?null:($('f_vEnd').value||null);
   if(pS&&pE&&pE<pS){ toast('배관공사 준공일이 착공일보다 빠릅니다'); return; }
-  if(vS&&vE&&vE<vS){ toast('포장공사 준공일이 착공일보다 빠릅니다'); return; }
+  if(tS&&tE&&tE<tS){ toast('임시포장 준공일이 착공일보다 빠릅니다'); return; }
+  if(vS&&vE&&vE<vS){ toast('절삭포장 준공일이 착공일보다 빠릅니다'); return; }
   if(!pS && $('f_pEnd').value){ toast('배관공사 착공일을 입력하세요'); return; }
-  if(!vS && $('f_vEnd').value){ toast('포장공사 착공일을 입력하세요'); return; }
+  if(!tS && $('f_tEnd').value){ toast('임시포장 착공일을 입력하세요'); return; }
+  if(!vS && $('f_vEnd').value){ toast('절삭포장 착공일을 입력하세요'); return; }
   const now=new Date().toISOString();
   const p = editing ? data.find(x=>x.id===editing) : blank();
   Object.assign(p,{ constructionId:$('f_cid').value.trim(), category:$('f_category').value, name, dong:$('f_dong').value.trim(), address:$('f_addr').value.trim(), note:$('f_note').value.trim(), updatedAt:now,
     pipe:{ startDate:pS, endDate:pE, contractor:$('f_pCont').value.trim(), totalLength:$('f_pLen').value===''?null:Number($('f_pLen').value), lineMarkDate:pS?($('f_lm').value||null):null },
-    pavement:{ startDate:vS, endDate:vE, contractor:$('f_vCont').value.trim()||null } });
+    pavement:{ temp:{startDate:tS,endDate:tE}, cut:{startDate:vS,endDate:vE}, contractor:$('f_vCont').value.trim() } });
   const newOwner=$('f_owner').value;
   p.owner=newOwner;
   try{
@@ -671,9 +716,9 @@ function renderList(){
     .sort((a,b)=> (b.pipe&&b.pipe.startDate||'') < (a.pipe&&a.pipe.startDate||'') ? -1 : 1);
   $('listCount').textContent = `${rows.length}건`;
   const st = (s,e)=> !s?'-': (e? `${s} ~ ${e}` : `${s} ~ <span class="tag ongoing">진행중</span>`);
-  $('listTbl').innerHTML = `<tr><th>구분</th><th>공사ID</th><th>공사명</th><th>주소</th><th>배관공사</th><th>업체</th><th>연장(m)</th><th>라인마크</th><th>포장공사</th><th></th></tr>`+
+  $('listTbl').innerHTML = `<tr><th>구분</th><th>공사ID</th><th>공사명</th><th>주소</th><th>배관공사</th><th>업체</th><th>연장(m)</th><th>라인마크</th><th>임시포장</th><th>절삭포장</th><th></th></tr>`+
     rows.map(p=>`<tr><td><span class="tag ${p.category==='폐지'?'retired':''}">${esc(p.category)}</span></td><td>${esc(p.constructionId||'')}</td><td class="l"><b>${esc(p.name)}</b></td><td class="l">${esc((p.dong?p.dong+' ':'')+(p.address||''))}</td>
-      <td>${st(p.pipe.startDate,p.pipe.endDate)}</td><td>${esc(p.pipe.contractor||'')}</td><td>${p.pipe.totalLength==null?'':p.pipe.totalLength}</td><td>${p.pipe.lineMarkDate||''}</td><td>${st(p.pavement.startDate,p.pavement.endDate)}</td>
+      <td>${st(p.pipe.startDate,p.pipe.endDate)}</td><td>${esc(p.pipe.contractor||'')}</td><td>${p.pipe.totalLength==null?'':p.pipe.totalLength}</td><td>${p.pipe.lineMarkDate||''}</td><td>${st(p.pavement.temp.startDate,p.pavement.temp.endDate)}</td><td>${st(p.pavement.cut.startDate,p.pavement.cut.endDate)}</td>
       <td><button class="btn secondary sm" data-id="${p.id}">수정</button></td></tr>`).join('');
   $('listTbl').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ $('ovlList').classList.remove('show'); openEdit(b.dataset.id); }));
 }
@@ -696,7 +741,7 @@ $('importFile').addEventListener('change',async()=>{
     const users=USERS.filter(u=>Array.isArray(obj[u]));
     if(!users.length) throw new Error('형식이 맞지 않습니다');
     if(!confirm(`백업 파일의 데이터(${users.map(u=>u+' '+obj[u].length+'건').join(', ')})를 Firebase에 등록합니다(같은 id는 덮어쓰기). 계속할까요?`)) return;
-    const list=[]; users.forEach(u=>obj[u].forEach(p=>{ if(!p.id) p.id=uid(); p.owner=u; list.push(p); }));
+    const list=[]; users.forEach(u=>obj[u].forEach(p=>{ if(!p.id) p.id=uid(); p.owner=u; list.push(normalize(p)); }));
     busy(true); await saveMany(list); busy(false); await load(); renderCal(); toast(`${list.length}건 복원되었습니다`);
   }catch(e){ busy(false); toast('가져오기 실패: '+e.message); }
 });

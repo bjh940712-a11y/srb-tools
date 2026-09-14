@@ -103,7 +103,12 @@
   .ovl.show{display:flex;}
   .modal{background:#fff;border-radius:12px;width:100%;max-width:720px;padding:20px 22px;box-shadow:0 10px 40px rgba(0,0,0,.2);}
   .modal h3{margin:0 0 12px;font-size:16px;display:flex;align-items:center;gap:8px;}
-  .modal h3 .x{margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:var(--muted);}
+  .modal h3 .x{margin-left:auto;border:1.5px solid var(--border);background:#f4f3f0;color:var(--text);font-size:0;font-weight:700;
+    cursor:pointer;border-radius:8px;padding:7px 13px;line-height:1;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;}
+  .modal h3 .x::before{content:'✕';font-size:12px;}
+  .modal h3 .x::after{content:'닫기';font-size:13px;}
+  .modal h3 .x:hover{background:var(--err);border-color:var(--err);color:#fff;}
+  .modal{position:relative;}
   .sec{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px;background:#fbfbfa;}
   .sec .t{font-size:13px;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
   .sec .t .sw{display:inline-block;width:12px;height:12px;border-radius:3px;}
@@ -258,7 +263,7 @@
   <div class="actions">
     <button class="btn danger sm" id="btnDelete" style="display:none;">삭제</button>
     <div class="right">
-      <button class="btn secondary" data-close="ovlEdit">취소</button>
+      <button class="btn secondary" data-close="ovlEdit">✕ 닫기 (저장 안 함)</button>
       <button class="btn primary" id="btnSave">저장</button>
     </div>
   </div>
@@ -268,7 +273,7 @@
 <div class="ovl" id="ovlDay"><div class="modal" style="max-width:560px;">
   <h3 id="dayTitle">일정<button class="x" data-close="ovlDay">×</button></h3>
   <div id="dayList"></div>
-  <div class="actions"><div class="right"><button class="btn primary sm" id="btnAddOnDay">이 날짜로 새 공사 등록</button></div></div>
+  <div class="actions"><div class="right"><button class="btn secondary sm" data-close="ovlDay">✕ 닫기</button><button class="btn primary sm" id="btnAddOnDay">이 날짜로 새 공사 등록</button></div></div>
 </div></div>
 
 <!-- 엑셀 업로드 -->
@@ -276,6 +281,7 @@
   <h3>엑셀 일괄 등록<button class="x" data-close="ovlUp">×</button></h3>
   <div class="hint" style="margin:0 0 10px;">ERP "공사정보" 엑셀(.xls/.xlsx)을 올리면 각 행이 공사 1건으로 등록됩니다. 현재 선택된 사용자 <b id="upOwner" style="color:var(--blue);"></b> 소속으로 전체 건이 등록됩니다.</div>
   <div class="drop" id="upDrop">여기에 엑셀 파일을 끌어다 놓거나 클릭해서 선택</div>
+  <div class="actions" id="upDropActions"><div class="right"><button class="btn secondary" data-close="ovlUp">✕ 닫기</button></div></div>
   <input type="file" id="upFile" accept=".xls,.xlsx">
   <div id="upMap" style="display:none;">
     <div class="hint">아래 항목이 엑셀의 어느 열인지 확인/지정하세요 (자동 인식 결과가 미리 선택되어 있습니다).</div>
@@ -301,6 +307,7 @@
   <h3>전체 공사 목록 <span class="tag" id="listCount"></span><button class="x" data-close="ovlList">×</button></h3>
   <div class="row" style="margin:0 0 6px;"><input type="text" id="listSearch" placeholder="공사명/주소/업체 검색" style="flex:1;"></div>
   <div style="overflow-x:auto;"><table class="list" id="listTbl"></table></div>
+  <div class="actions"><div class="right"><button class="btn secondary" data-close="ovlList">✕ 닫기</button></div></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
@@ -497,7 +504,8 @@ $('btnToday').addEventListener('click',()=>{ const t=new Date(); cur=new Date(t.
 
 /* ---------- 모달 공통 ---------- */
 document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>$(b.dataset.close).classList.remove('show')));
-document.querySelectorAll('.ovl').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('show'); }));
+// 창 바깥(어두운 영역)을 클릭해도 닫히지 않게 한다(입력 중 실수로 닫히는 것 방지). ESC 키와 닫기 버튼으로만 닫힌다.
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const o=[...document.querySelectorAll('.ovl.show')].pop(); if(o) o.classList.remove('show'); } });
 
 /* ---------- 날짜 목록 ---------- */
 function openDay(ds){
@@ -607,7 +615,7 @@ function bindDrop(drop, inp, cb){
   inp.addEventListener('change',()=>{ if(inp.files[0]) cb(inp.files[0]); inp.value=''; });
 }
 $('btnUpload').addEventListener('click',()=>{
-  $('upOwner').textContent=user; $('upMap').style.display='none'; $('upResult').style.display='none'; $('upDrop').style.display='';
+  $('upOwner').textContent=user; $('upMap').style.display='none'; $('upResult').style.display='none'; $('upDrop').style.display=''; $('upDropActions').style.display='';
   $('ovlUp').classList.add('show');
 });
 bindDrop($('upDrop'), $('upFile'), async file=>{
@@ -633,7 +641,7 @@ bindDrop($('upDrop'), $('upFile'), async file=>{
     }).join('');
     updateUpPreview();
     $('mapGrid').querySelectorAll('select').forEach(s=>s.addEventListener('change',updateUpPreview));
-    $('upDrop').style.display='none'; $('upMap').style.display='';
+    $('upDrop').style.display='none'; $('upDropActions').style.display='none'; $('upMap').style.display='';
   }catch(e){ toast('엑셀 읽기 실패: '+e.message); }
 });
 function mapping(){ const m={}; $('mapGrid').querySelectorAll('select').forEach(s=>{ m[s.dataset.key]= s.value===''?-1:Number(s.value); }); return m; }

@@ -1010,7 +1010,9 @@ function buildPrintJGS(){
   let dparts = dateStr.split('-');
   const dateKr = dparts.length===3 ? `${dparts[0]}년 ${dparts[1]}월 ${dparts[2]}일` : dateStr;
 
-  const row = (n,label,val)=>`<tr>${td(n+'. '+label,'text-align:left;font-weight:700;width:170px;')}${td(val,'text-align:left;padding-left:10px;')}</tr>`;
+  // 공사명~준공금 청구금액 표(빨간 박스 부분)는 원본 표(첨부 체크리스트)보다 한눈에 들어오게
+  // 글자를 11px→14.5px로 키우고 줄 높이(padding)도 넉넉히 잡는다.
+  const row = (n,label,val)=>`<tr>${td(n+'. '+label,'text-align:left;font-weight:700;width:170px;font-size:14.5px;padding:8px 10px;')}${td(val,'text-align:left;font-size:14.5px;padding:8px 10px 8px 14px;')}</tr>`;
   let html = `<div style="padding:24px;background:#fff;width:820px;font-family:'Malgun Gothic',sans-serif;border:2px solid #000;">`+
     `<div style="font-size:22px;font-weight:700;text-align:center;letter-spacing:10px;margin-bottom:20px;">준공검사조서</div>`+
     `<table style="border-collapse:collapse;width:100%;margin-bottom:16px;">`+

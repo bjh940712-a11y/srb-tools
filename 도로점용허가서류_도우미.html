@@ -404,10 +404,67 @@ function cellVm(sheetXml, ref){
   return v ? Number(v) : null;
 }
 
+/* ---- 폴백: "셀에 이미지 삽입"이 아니라 일반 그림(그리기 개체)로 사진을 붙여넣은 시트 지원 ----
+   일부 엑셀 파일은 사진을 리치값(xl/richData)이 아니라 전통적인 drawing(xl/drawings/drawingN.xml)
+   객체로 저장한다. 이 경우 xl/richData 관련 파일이 아예 없어 buildImageResolver가 null을 반환하므로,
+   시트에 연결된 drawing XML을 직접 읽어 그림의 셀 위치(열 번호)로 왼쪽(위치 현황도)/오른쪽(현장사진)을
+   구분해 가져온다. */
+function resolveRelTarget(basePath, relTarget){
+  const baseDir = basePath.split('/').slice(0,-1);
+  for(const p of relTarget.split('/')){
+    if(p==='..') baseDir.pop();
+    else if(p!=='.') baseDir.push(p);
+  }
+  return baseDir.join('/');
+}
+
+async function buildSheetDrawingPath(zip, sheetPath){
+  const sheetXml = await zip.file(sheetPath).async('string');
+  const drawTag = sheetXml.match(/<drawing[^>]*\/>/);
+  if(!drawTag) return null;
+  const rid = xmlAttr(drawTag[0], 'r:id');
+  if(!rid) return null;
+  const relsPath = sheetPath.replace(/xl\/worksheets\/(.+)\.xml$/, 'xl/worksheets/_rels/$1.xml.rels');
+  const relsFile = zip.file(relsPath);
+  if(!relsFile) return null;
+  const relsXml = await relsFile.async('string');
+  let drawTarget = null;
+  for(const m of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)){
+    if(xmlAttr(m[0],'Id')===rid){ drawTarget = xmlAttr(m[0],'Target'); break; }
+  }
+  return drawTarget ? resolveRelTarget(sheetPath, drawTarget) : null;
+}
+
+async function extractDrawingImages(zip, drawingPath){
+  const drawFile = zip.file(drawingPath);
+  if(!drawFile) return [];
+  const xml = await drawFile.async('string');
+  const relsPath = drawingPath.replace(/xl\/drawings\/(.+)\.xml$/, 'xl/drawings/_rels/$1.xml.rels');
+  const relsFile = zip.file(relsPath);
+  const relsXml = relsFile ? await relsFile.async('string') : '';
+  const relsMap = {};
+  for(const m of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)){
+    const id = xmlAttr(m[0],'Id'), target = xmlAttr(m[0],'Target');
+    if(id && target) relsMap[id] = target;
+  }
+  const anchors = xml.match(/<xdr:twoCellAnchor[\s\S]*?<\/xdr:twoCellAnchor>/g) || [];
+  const pics = [];
+  for(const a of anchors){
+    if(!a.includes('<xdr:pic>')) continue; // 그룹/도형 등은 제외, 실제 그림만
+    const fromMatch = a.match(/<xdr:from><xdr:col>(\d+)<\/xdr:col>/);
+    const embedMatch = a.match(/r:embed="(rId\d+)"/);
+    if(!fromMatch || !embedMatch) continue;
+    const target = relsMap[embedMatch[1]];
+    if(!target) continue;
+    pics.push({ col: Number(fromMatch[1]), mediaPath: resolveRelTarget(drawingPath, target) });
+  }
+  pics.sort((a,b)=>a.col-b.col); // 왼쪽(위치 현황도) -> 오른쪽(현장사진) 순
+  return pics;
+}
+
 async function extractPhotoSites(buf, wb){
   const zip = await JSZip.loadAsync(buf);
-  const resolve = await buildImageResolver(zip);
-  if(!resolve) return []; // 셀 삽입 이미지가 없는 워크북
+  const resolve = await buildImageResolver(zip); // null이면 셀삽입(richData) 방식이 아닌 워크북 - 아래에서 drawing 방식으로 폴백
 
   const sheetPathMap = await buildSheetPathMap(zip);
   const authority = $('authority').value.trim()||'영천시';
@@ -419,18 +476,29 @@ async function extractPhotoSites(buf, wb){
     const zf = path ? zip.file(path) : null;
     if(!zf) continue;
     const sheetXml = await zf.async('string');
-    const vm1 = cellVm(sheetXml, 'A2');
-    const vm2 = cellVm(sheetXml, 'H2');
-    if(vm1===null && vm2===null) continue; // 위치도가 없는 시트(요약/기타)는 건너뜀
+
+    let img1=null, img2=null;
+    if(resolve){
+      const vm1 = cellVm(sheetXml, 'A2');
+      const vm2 = cellVm(sheetXml, 'H2');
+      if(vm1!==null){ const p=resolve(vm1); if(p){ const f=zip.file(p); if(f) img1 = 'data:'+mimeFor(p)+';base64,'+await f.async('base64'); } }
+      if(vm2!==null){ const p=resolve(vm2); if(p){ const f=zip.file(p); if(f) img2 = 'data:'+mimeFor(p)+';base64,'+await f.async('base64'); } }
+    }
+    if(!img1 && !img2){
+      // 셀삽입 이미지가 없으면 전통적인 그림(drawing) 방식으로 폴백 시도
+      const drawPath = await buildSheetDrawingPath(zip, path);
+      if(drawPath){
+        const pics = await extractDrawingImages(zip, drawPath);
+        if(pics[0]){ const f=zip.file(pics[0].mediaPath); if(f) img1 = 'data:'+mimeFor(pics[0].mediaPath)+';base64,'+await f.async('base64'); }
+        if(pics[1]){ const f=zip.file(pics[1].mediaPath); if(f) img2 = 'data:'+mimeFor(pics[1].mediaPath)+';base64,'+await f.async('base64'); }
+      }
+    }
+    if(!img1 && !img2) continue; // 위치도가 없는 시트(요약/기타)는 건너뜀
 
     const ws = wb.Sheets[sheetName];
     const name = (ws && ws['A19'] ? String(ws['A19'].v) : '').trim();
     const addr = (ws && ws['B19'] ? String(ws['B19'].v) : '').trim();
     if(!name) continue;
-
-    let img1=null, img2=null;
-    if(vm1!==null){ const p=resolve(vm1); if(p){ const f=zip.file(p); if(f) img1 = 'data:'+mimeFor(p)+';base64,'+await f.async('base64'); } }
-    if(vm2!==null){ const p=resolve(vm2); if(p){ const f=zip.file(p); if(f) img2 = 'data:'+mimeFor(p)+';base64,'+await f.async('base64'); } }
 
     out.push({ sheetName, name, oldAddr: addr, title: name, loc: `${authority} ${addr}`, img1, img2 });
   }

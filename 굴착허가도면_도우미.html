@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>공사지원 도우미 - 굴착허가 도면 도우미</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="fontkit.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f7f7f5; --card:#fff; --border:#e3e1dc; --text:#2b2a27; --muted:#8a8780;
+    --accent:#c15f3c; --accent-dark:#a34e30; --ok:#4a7c59; --err:#b3432b; --blue:#3b6ea5;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;
+    background:var(--bg);color:var(--text);padding:28px 14px;}
+  .wrap{max-width:1100px;margin:0 auto;}
+  h1{font-size:22px;margin:0 0 4px;}
+  p.sub{color:var(--muted);margin:0 0 22px;font-size:13.5px;line-height:1.6;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:14px;}
+  .card h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+  .step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+    border-radius:50%;background:var(--accent);color:#fff;font-size:12.5px;flex-shrink:0;}
+  .step.done{background:var(--ok);}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+  input[type=text],input[type=date],input[type=number],select{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13.5px;background:#fff;font-family:inherit;}
+  input[type=file]{display:none;}
+  button.btn{border:none;border-radius:8px;padding:9px 15px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit;}
+  .btn.primary{background:var(--accent);color:#fff;}
+  .btn.primary:hover{background:var(--accent-dark);}
+  .btn.secondary{background:#eee;color:var(--text);}
+  .btn.secondary:hover{background:#e0e0e0;}
+  .btn.accent2{background:#fff;color:#3b6ea5;border:1.5px solid #3b6ea5;}
+  .btn.accent2:hover{background:#eef4fa;}
+  .btn.sm{padding:5px 10px;font-size:12px;}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6;}
+  .status{font-size:13px;font-weight:600;}
+  .status.ok{color:var(--ok);} .status.no{color:var(--err);}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;
+    padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;pointer-events:none;z-index:999;}
+  .toast.show{opacity:1;}
+  .sitenav{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap;}
+  .sitenav a{font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:20px;text-decoration:none;
+    border:1.5px solid var(--border);color:var(--muted);background:#fff;transition:.15s;}
+  .sitenav a:hover{border-color:var(--accent);color:var(--accent-dark);}
+  .sitenav a.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .brand{font-size:11.5px;font-weight:800;color:var(--accent);letter-spacing:.5px;margin:0 0 8px;}
+  table.list{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;}
+  table.list th,table.list td{border-bottom:1px solid var(--border);padding:7px 8px;text-align:left;white-space:nowrap;}
+  table.list th{background:#f4f3f0;font-weight:700;color:var(--muted);font-size:12px;}
+  table.list tr.sel td{background:#fbe8e1;}
+  table.list tbody tr{cursor:pointer;} table.list tbody tr:hover td{background:#f7f5f2;}
+  .fg{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 14px;}
+  .f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);}
+  .f input,.f select{width:100%;font-size:13px;}
+  .f.w2{grid-column:span 2;}
+  .seg{display:flex;gap:6px;align-items:center;margin-top:6px;}
+  .seg select{width:120px;} .seg input{width:100px;}
+  .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);}
+  .mapwrap{position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;margin-top:10px;}
+  #map{display:block;width:100%;height:460px;cursor:crosshair;}
+  .maptools{position:absolute;right:8px;top:8px;display:flex;gap:6px;}
+  .badge{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:12px;background:#eef4fa;color:var(--blue);}
+  .warn{margin-top:10px;padding:10px 12px;border-radius:8px;background:#fff6e5;border:1px solid #f0d9a8;font-size:12.5px;color:#7a5a12;display:none;line-height:1.6;}
+  #preview{width:100%;height:640px;border:1px solid var(--border);border-radius:10px;margin-top:12px;display:none;background:#fff;}
+  .busy{display:none;font-size:13px;color:var(--muted);}
+  @media (max-width:760px){.fg{grid-template-columns:1fr 1fr;} #map{height:340px;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">공사지원 도우미</div>
+  <div class="sitenav">
+    <a href="index.html">① 공사시공일지 도우미</a>
+    <a href="소규모배관공사_준공도우미.html">② 소규모 배관공사 준공 도우미</a>
+    <a href="소규모포장공사_준공도우미.html">③ 소규모 포장공사 준공 도우미</a>
+    <a href="공사계획_신고승인_작성_도우미.html">④ 공사계획 신고/승인 작성 도우미</a>
+    <a href="도로점용허가서류_도우미.html">⑤ 도로점용허가서류 도우미</a>
+    <a href="공사일정관리_도우미.html">⑥ 공사 일정 관리 도우미</a>
+    <a href="굴착허가도면_도우미.html" class="on">⑦ 굴착허가 도면 도우미</a>
+  </div>
+  <h1>굴착허가 도면 도우미</h1>
+  <p class="sub">품의 엑셀(작업발주서)과 회사 GIS 수치지도(DXF)로 굴착허가 공문 첨부용 인입 공급관 설계도를 회사 표준 양식에 맞춰 만듭니다.
+    결과는 AutoCAD에서 열 수 있는 DXF와 PDF로 내려받습니다. 모든 처리는 이 PC의 브라우저 안에서만 이루어지며 파일이 외부로 전송되지 않습니다.</p>
+
+  <!-- 0. 양식 -->
+  <div class="card">
+    <h2><span class="step" id="st0">0</span> 표준 양식 패키지 <span class="status" id="tplStatus"></span></h2>
+    <div class="row">
+      <button class="btn secondary" id="btnTpl">양식 패키지 등록 (.json)</button>
+      <input type="file" id="fTpl" accept=".json">
+      <span class="hint" style="margin:0">처음 한 번만 등록하면 이 PC 브라우저에 저장됩니다. (파일: 굴착허가도면_양식패키지.json)</span>
+    </div>
+  </div>
+
+  <!-- 1. 엑셀 -->
+  <div class="card">
+    <h2><span class="step" id="st1">1</span> 품의 엑셀 (작업발주서)</h2>
+    <div class="row">
+      <button class="btn primary" id="btnXls">엑셀 선택</button>
+      <input type="file" id="fXls" accept=".xlsx,.xlsm,.xls">
+      <span class="hint" style="margin:0" id="xlsName">소규모 품의 엑셀의 '작업발주서' 표에서 공사를 고릅니다.</span>
+    </div>
+    <div id="orderWrap" style="overflow-x:auto"></div>
+  </div>
+
+  <!-- 2. GIS -->
+  <div class="card">
+    <h2><span class="step" id="st2">2</span> GIS 수치지도 · 인입 위치</h2>
+    <div class="row">
+      <button class="btn primary" id="btnGis">수치지도 DXF 선택</button>
+      <input type="file" id="fGis" accept=".dxf">
+      <label class="f" style="flex-direction:row;align-items:center;gap:6px">배관 레이어
+        <select id="pipeLayer" style="min-width:220px"></select></label>
+      <span class="badge" id="teeInfo" style="display:none"></span>
+    </div>
+    <div class="mapwrap">
+      <canvas id="map"></canvas>
+      <div class="maptools">
+        <button class="btn secondary sm" id="zIn">＋</button>
+        <button class="btn secondary sm" id="zOut">－</button>
+        <button class="btn secondary sm" id="zFit">전체</button>
+      </div>
+    </div>
+    <div class="hint">지도에서 <b>건물(부지) 쪽 인입 위치</b>를 클릭하면 가장 가까운 기존관 위에 분기점이 잡히고, 배관과 직각 방향으로 인입관이 그려집니다. (휠: 확대/축소, 드래그: 이동)</div>
+  </div>
+
+  <!-- 3. 정보 -->
+  <div class="card">
+    <h2><span class="step" id="st3">3</span> 도면 정보 확인</h2>
+    <div class="fg">
+      <label class="f">법정동<input type="text" id="vDong"></label>
+      <label class="f">번지<input type="text" id="vJibun"></label>
+      <label class="f w2">수요처명 (도면 표기)<input type="text" id="vName"></label>
+      <label class="f">기존관 관경 (A)<input type="number" id="vMain"></label>
+      <label class="f">신설 인입관 관경 (A)<input type="number" id="vNew" value="63"></label>
+      <label class="f">기존관 심도 (M)<input type="number" id="vDepth" step="0.1" placeholder="미입력 시 1.2"></label>
+      <label class="f">작성일<input type="date" id="vDate"></label>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--muted)">포장 구간 (분기점 → 건물 순서) <span id="segSum" class="badge" style="margin-left:6px"></span></div>
+    <div id="segs"></div>
+    <div class="row"><button class="btn secondary sm" id="segAdd">+ 구간 추가</button></div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="vRain"> 우수BOX 있음</label>
+      <label class="f" style="flex-direction:row;align-items:center;gap:6px">폭(M)<input type="number" id="vRainW" value="0.6" step="0.1" style="width:80px"></label>
+      <label class="f" style="flex-direction:row;align-items:center;gap:6px">심도(M)<input type="number" id="vRainD" value="0.6" step="0.1" style="width:80px"></label>
+    </div>
+    <div class="hint">인입관 심도는 기존관 심도 − 0.1M, 지반고는 40.3으로 고정해 관정고를 계산합니다. 보호철판은 분기 지점에 항상 표시됩니다.</div>
+  </div>
+
+  <!-- 4. 생성 -->
+  <div class="card">
+    <h2><span class="step">4</span> 도면 만들기</h2>
+    <div class="row">
+      <button class="btn primary" id="btnMake">도면 생성</button>
+      <button class="btn accent2" id="btnPdf" disabled>PDF 내려받기</button>
+      <button class="btn accent2" id="btnDxf" disabled>DXF 내려받기 (AutoCAD)</button>
+      <span class="busy" id="busy">도면을 만드는 중…</span>
+    </div>
+    <div class="warn" id="warn"></div>
+    <iframe id="preview" title="도면 미리보기"></iframe>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* 굴착허가 도면 엔진 (서라벌도시가스 공사지원 도우미 ⑦)
+ * - GIS 수치지도 DXF 읽기, 품의 엑셀 작업발주서 읽기
+ * - 회사 표준 양식 베이스(DXF/PDF) 위에 건별 요소(평면도·DETAIL·SECTION·종단·제원표·표제)를 그려
+ *   DXF 문자열과 PDF 바이트를 만든다.
+ * 브라우저(window.ExcavEngine)와 Node(require) 모두에서 동작.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.ExcavEngine = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ 공통 */
+  const deg = Math.PI / 180;
+  const V = {
+    add: (a, b) => [a[0] + b[0], a[1] + b[1]],
+    sub: (a, b) => [a[0] - b[0], a[1] - b[1]],
+    mul: (a, s) => [a[0] * s, a[1] * s],
+    dot: (a, b) => a[0] * b[0] + a[1] * b[1],
+    len: a => Math.hypot(a[0], a[1]),
+    norm: a => { const l = Math.hypot(a[0], a[1]) || 1; return [a[0] / l, a[1] / l]; },
+    perp: a => [-a[1], a[0]],
+    ang: a => Math.atan2(a[1], a[0]) / deg,
+  };
+  const r4 = x => Math.round(x * 10000) / 10000;
+  const fmt1 = x => (Math.round(x * 10) / 10).toFixed(1);
+  const readable = a => { while (a > 90) a -= 180; while (a <= -90) a += 180; return a; };
+
+  const SEG_LABEL = { ASP: 'A.S.P', CONC: "CON'C", BRK: '보도', UNPAVED: '비포장' };
+  const SEG_COLOR = { ASP: 21, CONC: 30, BRK: 4, UNPAVED: 3 };
+
+  /* -------------------------------------------------------- DXF 텍스트 읽기 */
+  function decodeLines(buf) {
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const utf = new TextDecoder('utf-8', { fatal: true });
+    let kr = null; try { kr = new TextDecoder('euc-kr'); } catch (e) { kr = null; }
+    const out = []; let s = 0;
+    for (let i = 0; i <= u8.length; i++) {
+      if (i === u8.length || u8[i] === 10) {
+        let e = i; if (e > s && u8[e - 1] === 13) e--;
+        const sl = u8.subarray(s, e);
+        let t;
+        let ascii = true; for (let k = 0; k < sl.length; k++) if (sl[k] > 127) { ascii = false; break; }
+        if (ascii) t = String.fromCharCode.apply(null, sl.length < 60000 ? sl : Array.from(sl));
+        else { try { t = utf.decode(sl); } catch (err) { t = kr ? kr.decode(sl) : utf.decode(sl); } }
+        out.push(t); s = i + 1;
+      }
+    }
+    return out;
+  }
+  function stripMText(t) {
+    return t.replace(/\\P/g, '\n').replace(/\{\\[^;]*;/g, '').replace(/\\[A-Za-z][^;]*;/g, '').replace(/[{}]/g, '').trim();
+  }
+
+  /** GIS 수치지도 DXF → {polys, texts, layers} */
+  function readGisDxf(buf) {
+    const L = decodeLines(buf);
+    const pairs = [];
+    for (let i = 0; i + 1 < L.length; i += 2) pairs.push([parseInt(L[i].trim(), 10), L[i + 1]]);
+    let i = 0;
+    while (i < pairs.length && !(pairs[i][0] === 2 && pairs[i][1].trim() === 'ENTITIES')) i++;
+    const polys = [], texts = [];
+    let cur = null, pl = null;
+    const flush = () => {
+      if (!cur) return;
+      const t = cur.type, g = cur.g;
+      const layer = (g[8] && g[8][0]) || '0';
+      const color = g[62] ? parseInt(g[62][0], 10) : 256;
+      if (t === 'LWPOLYLINE') {
+        const xs = g[10] || [], ys = g[20] || [];
+        const pts = xs.map((x, k) => [parseFloat(x), parseFloat(ys[k])]);
+        if (pts.length > 1) polys.push({ layer, color, pts, closed: (parseInt((g[70] || ['0'])[0], 10) & 1) === 1 });
+      } else if (t === 'LINE') {
+        polys.push({ layer, color, pts: [[+g[10][0], +g[20][0]], [+g[11][0], +g[21][0]]], closed: false });
+      } else if (t === 'TEXT' || t === 'MTEXT') {
+        let s = t === 'MTEXT' ? stripMText((g[3] || []).join('') + (g[1] || [''])[0]) : (g[1] || [''])[0];
+        texts.push({ s: s.trim(), x: +g[10][0], y: +g[20][0], h: +(g[40] || [1])[0], rot: +(g[50] || [0])[0], layer });
+      } else if (t === 'POLYLINE') {
+        pl = { layer, color, pts: [], closed: (parseInt((g[70] || ['0'])[0], 10) & 1) === 1 };
+      } else if (t === 'VERTEX' && pl) {
+        pl.pts.push([+g[10][0], +g[20][0]]);
+      } else if (t === 'SEQEND' && pl) {
+        if (pl.pts.length > 1) polys.push(pl); pl = null;
+      }
+      cur = null;
+    };
+    for (i++; i < pairs.length; i++) {
+      const [c, v] = pairs[i];
+      if (c === 0) {
+        flush();
+        const t = v.trim();
+        if (t === 'ENDSEC') break;
+        cur = { type: t, g: {} };
+      } else if (cur) {
+        (cur.g[c] = cur.g[c] || []).push(v.trim());
+      }
+    }
+    flush();
+    const layers = {};
+    polys.forEach(p => {
+      const o = layers[p.layer] = layers[p.layer] || { name: p.layer, count: 0, colors: {} };
+      o.count++; o.colors[p.color] = (o.colors[p.color] || 0) + 1;
+    });
+    // 전체 범위
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    polys.forEach(p => p.pts.forEach(([x, y]) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }));
+    // 도곽/클립 사각형 표시 (전체 범위의 80% 이상인 단순 다각형)
+    polys.forEach(p => {
+      if (p.pts.length > 6) return;
+      let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+      p.pts.forEach(([x, y]) => { a = Math.min(a, x); b = Math.min(b, y); c = Math.max(c, x); d = Math.max(d, y); });
+      if ((c - a) > 0.8 * (x1 - x0) && (d - b) > 0.8 * (y1 - y0)) p.frame = true;
+    });
+    return { polys, texts, layers: Object.values(layers), extent: [x0, y0, x1, y1] };
+  }
+
+  /** 배관 레이어 추정: 색 5(파랑) 비중이 가장 큰 레이어, 없으면 'PE/LP/MP' 문자에 가장 가까운 레이어 */
+  function guessPipeLayer(gis) {
+    let best = null, bs = 0;
+    gis.layers.forEach(l => { const s = (l.colors[5] || 0) / l.count; if (s > bs) { bs = s; best = l.name; } });
+    if (best && bs > 0.5) return best;
+    const lab = gis.texts.find(t => /(PE|PLP|SP)\s*\d+|LP\d*|MP\d*/i.test(t.s));
+    if (lab) {
+      let bd = Infinity;
+      gis.polys.forEach(p => { if (p.frame) return; const r = nearestOnPoly(p.pts, [lab.x, lab.y]); if (r.dist < bd) { bd = r.dist; best = p.layer; } });
+    }
+    return best;
+  }
+
+  function nearestOnPoly(pts, q) {
+    let best = { dist: Infinity };
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const a = pts[k], b = pts[k + 1], ab = V.sub(b, a), l2 = V.dot(ab, ab);
+      if (l2 < 1e-12) continue;
+      let t = V.dot(V.sub(q, a), ab) / l2; t = Math.max(0, Math.min(1, t));
+      const f = V.add(a, V.mul(ab, t)), d = V.len(V.sub(q, f));
+      if (d < best.dist) best = { dist: d, foot: f, dir: V.norm(ab), seg: k };
+    }
+    return best;
+  }
+  /** 클릭점 → 가장 가까운 배관 위 분기점(foot)과 인입 방향 */
+  function snapTee(gis, pipeLayer, click) {
+    let best = { dist: Infinity };
+    gis.polys.forEach(p => {
+      if (p.layer !== pipeLayer || p.frame) return;
+      const r = nearestOnPoly(p.pts, click);
+      if (r.dist < best.dist) best = r;
+    });
+    if (!best.foot) return null;
+    let dir = V.sub(click, best.foot);
+    if (V.len(dir) < 0.3) dir = V.perp(best.dir);           // 배관 위를 찍으면 수직 방향
+    else {                                                     // 배관과 수직 성분만 사용
+      const n = V.perp(best.dir); dir = V.dot(dir, n) >= 0 ? n : V.mul(n, -1);
+    }
+    return { foot: best.foot, dir: V.norm(dir), pipeDir: best.dir, dist: best.dist };
+  }
+
+  /* ------------------------------------------------------- 품의 엑셀 읽기 */
+  /** SheetJS workbook → 작업발주서 행 목록 */
+  function readOrderSheet(XLSX, wb) {
+    const name = wb.SheetNames.find(n => {
+      const ws = wb.Sheets[n]; const a = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+      return a.some(r => r.some(c => String(c).indexOf('작업발주서') >= 0));
+    }) || wb.SheetNames[0];
+    const A = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
+    let hdr = A.findIndex(r => String(r[0]).trim() === 'NO' && r.some(c => String(c).indexOf('배관공사') >= 0));
+    if (hdr < 0) throw new Error('작업발주서 표의 머리글(NO)을 찾지 못했습니다');
+    const rows = [];
+    const PAVE = { 'A.S.P': 'ASP', 'ASP': 'ASP', "CON'C": 'CONC', 'CONC': 'CONC', '콘크리트': 'CONC', '보도': 'BRK', 'B.R.K': 'BRK', '비포장': 'UNPAVED' };
+    for (let r = hdr + 2; r < A.length; r++) {
+      const R = A[r]; const no = R[0];
+      if (String(no).trim() === '' || isNaN(Number(no)) || Number(no) <= 0) { if (String(R[1]).trim() === '' && String(no).trim() === '') break; else continue; }
+      const segs = [];
+      for (const [ci, li] of [[10, 11], [12, 13], [14, 15], [16, 17]]) {
+        const k = PAVE[String(R[ci]).trim().toUpperCase()] || PAVE[String(R[ci]).trim()];
+        const l = parseFloat(R[li]);
+        if (k && l > 0) segs.push({ type: k, len: l });
+      }
+      // 순서: 도로(A.S.P/CON'C) → 보도 → 비포장
+      const ord = { ASP: 0, CONC: 1, BRK: 2, UNPAVED: 3 };
+      segs.sort((a, b) => ord[a.type] - ord[b.type]);
+      rows.push({
+        no: Number(no), name: String(R[1]).trim(), addr: String(R[2]).trim(), newAddr: String(R[3]).trim(),
+        mainMat: String(R[5]).trim(), mainDia: parseFloat(R[6]) || '', newDia: parseFloat(R[7]) || '',
+        total: parseFloat(R[8]) || segs.reduce((s, x) => s + x.len, 0), segs,
+      });
+    }
+    return { sheet: name, rows };
+  }
+  function splitAddr(addr) {
+    const m = String(addr).trim().match(/^(\S+?(?:동|리|읍|면|가))\s*(.*)$/);
+    return m ? { dong: m[1], jibun: m[2].replace(/번지$/, '') } : { dong: '', jibun: String(addr).trim() };
+  }
+
+  /* ---------------------------------------------------------- 도면 요소 생성 */
+  function baseKeyFor(segs) {
+    const t = new Set(segs.map(s => s.type));
+    const road = t.has('ASP') && t.has('CONC') ? 'ASP+CONC' : t.has('ASP') ? 'ASP' : t.has('CONC') ? 'CONC' : '';
+    const warn = [];
+    if (t.has('ASP') && t.has('CONC') && t.has('BRK')) warn.push("A.S.P·CON'C·보도 3종 조합은 양식 슬롯이 2개라 보도 복구단면도는 생략됩니다.");
+    if (road === 'ASP+CONC') return { key: 'ASP+CONC', warn };
+    if (road && t.has('BRK')) return { key: road + '+BRK', warn };
+    if (road) return { key: road, warn };
+    if (t.has('BRK')) return { key: 'BRK', warn };
+    warn.push('포장 구분이 없어 A.S.P 양식을 사용합니다.');
+    return { key: 'ASP', warn };
+  }
+
+  function clipSeg(p, q, R) {   // Liang–Barsky
+    let t0 = 0, t1 = 1; const dx = q[0] - p[0], dy = q[1] - p[1];
+    const P = [-dx, dx, -dy, dy], Q = [p[0] - R[0], R[2] - p[0], p[1] - R[1], R[3] - p[1]];
+    for (let k = 0; k < 4; k++) {
+      if (P[k] === 0) { if (Q[k] < 0) return null; }
+      else { const t = Q[k] / P[k]; if (P[k] < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; } }
+    }
+    return [[p[0] + t0 * dx, p[1] + t0 * dy], [p[0] + t1 * dx, p[1] + t1 * dy]];
+  }
+  function clipPoly(pts, R) {
+    const out = []; let cur = null;
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const s = clipSeg(pts[k], pts[k + 1], R);
+      if (!s) { if (cur) { out.push(cur); cur = null; } continue; }
+      if (cur && V.len(V.sub(cur[cur.length - 1], s[0])) < 1e-6) cur.push(s[1]);
+      else { if (cur) out.push(cur); cur = [s[0], s[1]]; }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  /**
+   * @param pkg  양식 패키지 (meta, symbols)
+   * @param c    건 정보 {dong,jibun,name,date,mainDia,newDia,segs:[{type,len}],depthMain,rainBox:{w,d}|null,
+   *                      gis, pipeLayer, tee:{foot,dir}}
+   */
+  function buildDrawing(pkg, c) {
+    const M = pkg.meta, S = pkg.symbols;
+    const P = [];   // primitives
+    const line = (p, q, o = {}) => P.push({ t: 'line', p, q, c: o.c ?? 7, lw: o.lw, layer: o.layer || '0', lt: o.lt });
+    const poly = (pts, o = {}) => P.push({ t: 'poly', pts, closed: !!o.closed, c: o.c ?? 7, lw: o.lw, layer: o.layer || '0', lt: o.lt, lts: o.lts });
+    const circ = (p, r, o = {}) => P.push({ t: 'circle', p, r, c: o.c ?? 7, lw: o.lw, layer: o.layer || '0', lt: o.lt, lts: o.lts });
+    const text = (s, p, h, o = {}) => P.push({ t: 'text', s, p, h, rot: o.rot || 0, c: o.c ?? 7, style: o.style || '굴림', layer: o.layer || '0', align: o.align || 'L' });
+    const solid = (pts, o = {}) => P.push({ t: 'solid', pts, c: o.c ?? 7, layer: o.layer || '0' });
+    const hatch = (polys, pattern, o = {}) => P.push({ t: 'hatch', polys, pattern, scale: o.scale || 1, angle: o.angle || 0, c: o.c ?? 7, layer: o.layer || '0' });
+    const arrow = (tip, dir, size = 1.6, col = 7) => {
+      const u = V.norm(dir), n = V.perp(u);
+      solid([tip, V.add(V.sub(tip, V.mul(u, size)), V.mul(n, size * .2)), V.sub(V.sub(tip, V.mul(u, size)), V.mul(n, size * .2))], { c: col });
+    };
+    const dimline = (p, q, txt, col = 7, h = 2.07) => {
+      const u = V.norm(V.sub(q, p)), n = V.perp(u);
+      line(p, q, { c: col }); arrow(p, V.mul(u, -1), 1.6, col); arrow(q, u, 1.6, col);
+      let a = V.ang(u); const flip = !(a > -90 && a <= 90); a = readable(a);
+      const m = V.add(V.mul(V.add(p, q), .5), V.mul(n, flip ? -0.7 : 0.7));
+      text(txt, m, h, { rot: a, c: col, align: 'BC' });
+    };
+    const translatePrims = (list, o) => list.forEach(pr => {
+      const tr = pt => [pt[0] + o[0], pt[1] + o[1]];
+      const q = JSON.parse(JSON.stringify(pr));
+      if (q.p) q.p = tr(q.p); if (q.q) q.q = tr(q.q);
+      if (q.pts) q.pts = q.pts.map(tr); if (q.polys) q.polys = q.polys.map(pp => pp.map(tr));
+      if (q.t === 'hatch' && q.pattern !== 'SOLID') q.scale = q.scale || 1;
+      P.push(q);
+    });
+
+    const segs = c.segs.filter(s => s.len > 0);
+    const L = segs.reduce((s, x) => s + x.len, 0);
+    const cum = []; let acc = 0; segs.forEach(s => { cum.push([acc, acc + s.len]); acc += s.len; });
+    const MD = c.mainDia, ND = c.newDia;
+    const D_MAIN = c.depthMain || 1.2, D_NEW = Math.round((D_MAIN - 0.1) * 100) / 100;
+    const GL = M.gl, IL_MAIN = Math.round((GL - D_MAIN) * 100) / 100, IL_NEW = Math.round((GL - D_NEW) * 100) / 100;
+    const iWalk = segs.findIndex(s => s.type === 'BRK');
+    const roadEnd = segs.filter(s => s.type === 'ASP' || s.type === 'CONC').reduce((s, x) => s + x.len, 0);
+    const rb = c.rainBox && c.rainBox.w > 0 ? c.rainBox : null;
+    const rbStart = rb ? (iWalk >= 0 ? cum[iWalk][0] : Math.max(0, roadEnd - rb.w - 0.3)) : 0;
+
+    /* ---------- 평면도 1/500 */
+    const PL = M.plan, K = 2.0;
+    const R = [PL[0] + .3, PL[1] + .3, PL[2] - .3, PL[3] - .3];
+    const tee = c.tee.foot, dir = c.tee.dir;
+    const PC = V.sub([(PL[0] + PL[2]) / 2, (PL[1] + PL[3]) / 2], V.mul(dir, L * K * 0.5 + 12));
+    const W2P = q => V.add(PC, V.mul(V.sub(q, tee), K));
+    c.gis.polys.forEach(p => {
+      if (p.frame) return;
+      const isPipe = p.layer === c.pipeLayer;
+      const pts = p.pts.map(W2P);
+      clipPoly(pts, R).forEach(seg => {
+        if (isPipe) poly(seg, { c: 5, lw: 35, layer: '공급자배관_저압' });
+        else if (p.color === 8 || p.color === 7 || p.color === 256 || p.color === 0) poly(seg, { c: 7, lw: 25, layer: '도로' });
+        else poly(seg, { c: 8, lw: 13, layer: '지장물' });
+      });
+    });
+    const tp = W2P(tee), te = W2P(V.add(tee, V.mul(dir, L)));
+    poly([tp, te], { c: 6, lw: 50, layer: '도면층3' });
+    circ(tp, 1.25, { c: 7, layer: '0' });
+    hatch([Array.from({ length: 16 }, (_, k) => V.add(tp, [0.45 * Math.cos(k * Math.PI / 8), 0.45 * Math.sin(k * Math.PI / 8)]))], 'SOLID', { c: 7 });
+    circ(V.add(tp, V.mul(dir, 6)), 15.5, { c: 4, lw: 50, lt: 'HIDDEN', lts: 0.6 });
+    text('"A"', V.add(tp, [-13, 15]), 5.84, { c: 1, layer: 'DIM' });
+    const jibunRe = /^\d+(-\d+)?$/;
+    c.gis.texts.forEach(t => {
+      if (!jibunRe.test(t.s) || t.s === c.jibun) return;
+      const p = W2P([t.x, t.y]);
+      if (p[0] > R[0] + 4 && p[0] < R[2] - 10 && p[1] > R[1] + 3 && p[1] < R[3] - 4) text(t.s, p, 2.4, { style: 'Standard' });
+    });
+    const lp = W2P(V.add(tee, V.mul(dir, L + 9)));
+    text(c.jibun, V.add(lp, [0, 3]), 3.9, { c: 3, style: 'GHS', align: 'MC' });
+    text(c.name, V.sub(lp, [0, 2.5]), 3.9, { c: 3, style: 'GHS', align: 'MC' });
+    // 기존관 라벨: 분기점에서 12~22m 떨어진 배관 위, 인입 반대쪽 우선
+    {
+      let best = null, bs = -Infinity;
+      c.gis.polys.forEach(p => {
+        if (p.layer !== c.pipeLayer || p.frame) return;
+        for (let k = 0; k + 1 < p.pts.length; k++) {
+          const a = p.pts[k], b = p.pts[k + 1], segL = V.len(V.sub(b, a));
+          for (let t = 0; t <= segL; t += 1) {
+            const q = V.add(a, V.mul(V.norm(V.sub(b, a)), t)), d = V.len(V.sub(q, tee));
+            if (d < 12 || d > 22) continue;
+            const pp = W2P(q); if (!(pp[0] > R[0] + 8 && pp[0] < R[2] - 8 && pp[1] > R[1] + 8 && pp[1] < R[3] - 8)) continue;
+            const sc = -V.dot(V.norm(V.sub(q, tee)), dir) + (t + 9 < segL ? 1 : 0);
+            if (sc > bs) { bs = sc; best = { q, u: V.norm(V.sub(b, a)) }; }
+          }
+        }
+      });
+      if (best) {
+        let a = V.ang(best.u); const u = readable(a) === a ? best.u : V.mul(best.u, -1);
+        let n = V.perp(u); if (V.dot(n, dir) > 0) n = V.mul(n, -1);
+        const p0 = V.add(W2P(best.q), V.mul(n, 1.0));
+        text(`기존관KSM3514LP${MD}A`, V.add(p0, V.mul(u, -12)), 2.27, { rot: readable(a), c: 5, style: '지명', layer: '바탕선', align: 'L' });
+      }
+    }
+    {
+      const l0 = W2P(V.add(tee, V.mul(dir, L * 0.5))), l1 = V.add(l0, [6, 9]), l2 = V.add(l1, [33, 0]);
+      poly([l0, l1, l2], { c: 21, layer: '바탕선' });
+      text(`E/F S/T천공 ${MD}*${ND}A(L=${fmt1(L)}M)`, V.add(l1, [0.5, 0.6]), 1.82, { c: 21, style: '지명', layer: '바탕선' });
+      text(`${c.jibun}번지 인입 공급관`, V.add(l1, [0.5, -2.6]), 1.82, { c: 21, style: '지명', layer: '바탕선' });
+    }
+
+    /* ---------- DETAIL "A" (S=NONE) */
+    const DT = M.detail, RD = [DT[0] + .5, DT[1] + .5, DT[2] - .5, DT[3] - .5];
+    const k = Math.min(11, 70 / L);
+    const O = [219334.0, 256446.0];
+    const uA = [Math.cos(30 * deg), Math.sin(30 * deg)], uS = [Math.cos(150 * deg), Math.sin(150 * deg)];
+    const D = (u, v) => V.add(O, V.add(V.mul(uS, u * k), V.mul(uA, v * k)));
+    const vr = 140 / k;
+    const dpl = (pts, o) => clipPoly(pts, RD).forEach(s => poly(s, o));
+    dpl([D(0, -vr), D(0, vr)], { c: 5, lw: 35 });
+    cum.slice(0, -1).forEach(([, b]) => dpl([D(b, -vr), D(b, vr)], { c: 7, lw: 18 }));
+    dpl([D(L, -vr), D(L, 3.0), D(L + 90 / k, 3.0)], { c: 1, lw: 25 });
+    dpl([D(-35 / k, -vr), D(-35 / k, vr)], { c: 1, lw: 25 });
+    translatePrims(S.tee, O);
+    const tt = S.tee_text;
+    text(`SPLIT TEE ${MD}*${ND}A`, V.add(O, tt.tee.p), tt.tee.h, { rot: tt.tee.rot, style: tt.tee.style });
+    text('보호철판 0.5M', V.add(O, tt.plate.p), tt.plate.h, { rot: tt.plate.rot, style: tt.plate.style, c: 21 });
+    const J = V.add(O, S.J_rel), along = V.dot(S.J_rel, uA) / k;
+    poly([J, D(L, along)], { c: 6, lw: 50 });
+    if (rb) {
+      const q = [D(rbStart, -2.6 * 11 / k), D(rbStart + rb.w, -2.6 * 11 / k), D(rbStart + rb.w, 2.6 * 11 / k), D(rbStart, 2.6 * 11 / k)];
+      hatch([q], 'ANSI31', { c: 8, scale: 0.25 }); poly(q, { c: 8, closed: true });
+      const r0 = D(rbStart + 0.3, -2.0 * 11 / k), r1 = V.add(r0, [-6, -12]);
+      line(r0, r1, { c: 8 }); line(r1, V.add(r1, [-32, 0]), { c: 8 });
+      text(`우수BOX 폭${fmt1(rb.w)}M 심도${fmt1(rb.d)}M`, V.add(r1, [-31.5, 0.6]), 2.07, { c: 8 });
+    }
+    const vo = -5.0 * 11 / k, vd = 2.4 * 11 / k;
+    dimline(D(0, vo), D(L, vo), `S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 7);
+    line(D(0, -0.8 * 11 / k), D(0, vo - 0.8 * 11 / k)); line(D(L, -0.5 * 11 / k), D(L, vo - 0.8 * 11 / k));
+    segs.forEach((s, i) => {
+      const [a, b] = cum[i]; const col = SEG_COLOR[s.type];
+      dimline(D(a, vd), D(b, vd), `${SEG_LABEL[s.type]} S:${fmt1(s.len)}M`, col);
+      line(D(a, 1.2 * 11 / k), D(a, 3.0 * 11 / k), { c: col }); line(D(b, 1.2 * 11 / k), D(b, 3.0 * 11 / k), { c: col });
+    });
+    text(`PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, D(L - 0.4, 0.25 * 11 / k), 2.07, { rot: -30, c: 6 });
+    text(`기존관 LP PE ${MD}A 심도${fmt1(D_MAIN)}M`, D(0.22 * 11 / k, -4.45 * 11 / k), 2.07, { rot: 30, c: 5 });
+    text(`${c.dong} ${c.jibun}번지`, D(L + 3.0 * 11 / k, -2.0 * 11 / k), 3.6);
+    text(c.name, V.add(D(L + 3.0 * 11 / k, -2.0 * 11 / k), [3, -5.2]), 3.6);
+    text('도로', D(-1.6 * 11 / k, -3.5 * 11 / k), 3.0, { rot: 30 });
+
+    /* ---------- SECTION */
+    const SE = M.section, G = SE.G, XS0 = SE.XS0, XE = SE.XE, VS = 10;
+    const xs = d => XS0 + (XE - XS0) * d / L;
+    line([SE.XL, G], [XE + 6, G], { layer: 'DIM' });
+    line([SE.XL - 3, G], [SE.XL, G], { layer: '지하수위' });
+    poly([[219297.5, G + 2.5], [219299.0, G + 3.5], [219297.5, G + 4.5]]); poly([[219296.5, G + 2.5], [219298.0, G + 3.5], [219296.5, G + 4.5]]);
+    text('도로', [219282.0, G + 6.5], 3.28, { style: 'STYLE1', layer: '도면층3' });
+    line([XE, G], [XE, G + 26.5]); line([XE - 2.8, G + 23.5], [XE + 2.8, G + 29.2]);
+    cum.slice(0, -1).forEach(([, b]) => line([xs(b), G], [xs(b), G + 1.5]));
+    segs.forEach((s, i) => text(SEG_LABEL[s.type], [(xs(cum[i][0]) + xs(cum[i][1])) / 2 + (i === 0 ? -2 : 0), G + 0.4], 3.0, { style: '지명', layer: '바탕선', align: 'BC' }));
+    const yM = G - D_MAIN * VS, yN = G - D_NEW * VS;
+    poly([[XS0 - 4.0, G], [XS0 - 2.2, yM - 3.1], [XS0 + 2.3, yM - 3.1], [XS0 + 4.0, G]], { layer: 'DIM' });
+    circ([XS0, yM - 1.05], 1.05, { c: 5, layer: '도면층3' });
+    line([XS0 + 0.2, yM - 2.2], [XS0 + 0.2, yM - 9.0], { c: 8, layer: '바탕선' }); line([XS0 + 0.2, yM - 9.0], [XS0 + 2.3, yM - 9.0], { c: 8, layer: '바탕선' });
+    text(`기존관LP${MD}A`, [XS0 + 2.4, yM - 9.5], 1.89, { style: '지명', layer: '바탕선' });
+    const yP = G - 5.0;
+    line([XS0 - 3.5, yP], [XS0 + 3.5, yP], { c: 1, lw: 35 }); line([XS0 - 4.3, yP - .5], [XS0 - 3.5, yP], { c: 1 }); line([XS0 + 3.5, yP], [XS0 + 4.3, yP - .5], { c: 1 });
+    line([XS0 + 1.2, yP + .1], [XS0 + 1.6, G + 1.4], { c: 8, layer: '바탕선' }); line([XS0 + 1.6, G + 1.4], [XS0 + 3.8, G + 1.4], { c: 8, layer: '바탕선' });
+    text('보호철판', [XS0 + 4.0, G + 0.8], 1.89, { style: '지명', layer: '바탕선', c: 8 });
+    line([XS0 + 0.3, yN], [XE, yN], { c: 6, lw: 35, layer: '도면층3' }); line([XS0 + 0.3, yN - 0.6], [XE, yN - 0.6], { c: 6, lw: 35, layer: '도면층3' });
+    line([XS0 + 0.3, yN - 0.6], [XS0 + 0.3, yM - 0.2], { c: 6, layer: '도면층3' });
+    [0, 0.8].forEach(dx => poly([[XE + dx, yN + 1.4], [XE + 1.0 + dx, yN - 0.3], [XE + dx, yN - 2.0]], { c: 6 }));
+    text('단지내 연결', [XE + 3.3, yN - 1.3], 2.62, { style: 'STYLE1', layer: '도면층3' });
+    if (rb) {
+      const bx = xs(rbStart) + 0.8, bw = Math.max(4, (XE - XS0) * rb.w / L);
+      const q = [[bx, G], [bx + bw, G], [bx + bw, G - rb.d * VS], [bx, G - rb.d * VS]];
+      hatch([q], 'ANSI31', { c: 8, scale: 0.2 }); poly(q, { c: 8, closed: true });
+      text('우수BOX', [bx + bw + 0.5, G - 2.2], 1.89, { style: '지명', layer: '바탕선', c: 8 });
+    }
+    const vdim = (x, y0, y1, t) => {
+      line([x - 1.9, y0], [x + 1.9, y0], { layer: '도면층3' }); line([x - 1.9, y1], [x + 1.9, y1], { layer: '도면층3' });
+      line([x, y0], [x, y1], { layer: '도면층3' }); arrow([x, y0], [0, 1]); arrow([x, y1], [0, -1]);
+      text(t, [x - 1.4, (y0 + y1) / 2], 1.8, { rot: 90, style: 'Standard', layer: '도면층3', align: 'MC' });
+    };
+    vdim(XS0 - 7.5, G, yM, `${fmt1(D_MAIN)}M`);
+    vdim(XE - 4.5, G, yN, `${fmt1(D_NEW)}M`);
+    const yd = G + 10.6;
+    line([XS0, G + 1.2], [XS0, yd + 2.5], { layer: '도면층3' }); line([XE, yd - 2.5], [XE, yd + 2.5], { layer: '도면층3' });
+    line([XS0, yd], [XE, yd], { layer: '도면층3' }); arrow([XS0, yd], [-1, 0], 3.0); arrow([XE, yd], [1, 0], 3.0);
+    text(`${fmt1(L)}M`, [(XS0 + XE) / 2, yd + 0.6], 3.0, { style: 'Standard', layer: '도면층3', align: 'BC' });
+    text(`${c.jibun}번지`, [219417.2, 256364.7], 3.28, { style: 'STYLE1', layer: '도면층3' });
+    text(c.name, [219417.3, 256360.6], 3.28, { style: 'STYLE1', layer: '도면층3' });
+    text(`SECTION (${c.name}인입)`, SE.title, 2.8665, { style: 'STYLE1', layer: '도면층3' });
+
+    /* ---------- 종단면도 */
+    const PF = M.profile, x0 = PF.x0;
+    const HS = Math.min(PF.hs, (PF.xmax - x0 - 4) / L);
+    const ye = el => PF.y37 + (el - 37) * PF.vs;
+    const xe = x0 + L * HS;
+    line([x0, ye(GL)], [PF.xmax, ye(GL)], { c: 256, layer: 'DIM' });
+    [x0, xe].forEach(x => line([x, PF.y37], [x, ye(GL)], { c: 256, layer: '도면층4' }));
+    translatePrims(S.prof_tee, [x0, ye(IL_NEW)]);
+    translatePrims(S.prof_end, [xe, ye(IL_NEW)]);
+    line([x0, ye(IL_NEW)], [xe, ye(IL_NEW)], { c: 6, lw: 35, layer: 'DIM' });
+    line([x0, ye(IL_MAIN) - 0.6], [x0 + 1.9, PF.y37 + 12.1], { c: 21, layer: '바탕선' }); line([x0 + 1.9, PF.y37 + 12.1], [x0 + 2.6, PF.y37 + 12.1], { c: 21, layer: '바탕선' });
+    text(`SPLIT TEE ${MD}*${ND}A`, [x0 + 2.7, PF.y37 + 11.6], 1.11, { style: '지명', layer: '바탕선', c: 21 });
+    text(`KSM3514LP${ND}A(${fmt1(L)}M)`, [xe + 0.6, ye(IL_NEW) - 0.4], 1.11, { style: '지명', layer: '바탕선' });
+    text(`내관연결${ND}A`, [xe + 1.0, ye(IL_NEW) - 3.0], 1.11, { style: '지명', layer: '바탕선', c: 21 });
+    if (rb) {
+      const bx = x0 + rbStart * HS;
+      const q = [[bx, ye(GL)], [bx + rb.w * HS, ye(GL)], [bx + rb.w * HS, ye(GL - rb.d)], [bx, ye(GL - rb.d)]];
+      hatch([q], 'ANSI31', { c: 8, scale: 0.1 }); poly(q, { c: 8, closed: true, layer: '도면층4' });
+      text('우수BOX', [bx + rb.w * HS + 0.5, ye(GL) - 3.5], 1.11, { style: '지명', layer: '바탕선' });
+    }
+    const vt = (s, x, y) => text(s, [x + 1.0, y], 1.5, { rot: 90, style: 'STYLE1', layer: 'DIM', c: 256 });
+    [[x0, ['NO.0', '0', '0', fmt1(GL), fmt1(IL_MAIN), fmt1(D_MAIN)]], [xe, ['NO.0', fmt1(L), fmt1(L), fmt1(GL), fmt1(IL_NEW), fmt1(D_NEW)]]].forEach(([x, vals]) => {
+      ['sta', 'dist', 'add', 'gl', 'il', 'dep'].forEach((rk, i) => vt(vals[i], x, PF.rows[rk]));
+      PF.ticks.forEach(([a, b]) => line([x, a], [x, b], { c: 256, layer: 'DIM' }));
+    });
+    vt(`+${fmt1(L)}M`, xe + 2.0, PF.rows.sta - 0.5);
+    cum.forEach(([a]) => line([x0 + a * HS, PF.remark[0]], [x0 + a * HS, PF.remark[2]], { c: 256, layer: 'DIM' }));
+    line([xe, PF.remark[0]], [xe, PF.remark[2]], { c: 256, layer: 'DIM' });
+    line([x0, PF.remark[1]], [PF.xmax, PF.remark[1]], { c: 256, layer: 'DIM' });
+    segs.forEach((s, i) => {
+      const a = x0 + cum[i][0] * HS, b = x0 + cum[i][1] * HS, wide = (b - a) > 7;
+      const px = wide ? (a + b) / 2 : a + 0.4, al = wide ? 'BC' : 'L';
+      text(SEG_LABEL[s.type], [px, PF.remark[1] + 0.2], 1.4, { style: '지명', layer: '바탕선', align: al });
+      text(`L=${fmt1(s.len)}M`, [px, PF.remark[1] - 2.3], 1.4, { style: '지명', layer: '바탕선', align: al });
+    });
+
+    /* ---------- 제원표 · 표제 */
+    const TB = M.table;
+    segs.slice(0, TB.rows.length).forEach((s, i) => {
+      [SEG_LABEL[s.type], `${ND}A`, `${fmt1(s.len)}M`, 'KSM3514', 'LP'].forEach((v, j) => text(v, [TB.cols[j], TB.rows[i]], 1.611, { style: '지명', layer: '바탕선', c: 256 }));
+    });
+    [`${ND}A`, `${fmt1(L)}M`, 'KSM3514', 'LP'].forEach((v, j) => text(v, [TB.cols[j + 1], TB.sum], 1.611, { style: '지명', layer: '바탕선', c: 256 }));
+    text(`${c.dong} ${c.name} 인입 공급관`, M.title.name, 1.9465, { style: '굴림', layer: 'DIM', c: 7 });
+    text(c.date, M.title.date, 1.6926, { style: 'Standard', layer: 'DIM', c: 256 });
+
+    const bk = baseKeyFor(segs);
+    return { prims: P, baseKey: bk.key, warnings: bk.warn, L };
+  }
+
+  /* -------------------------------------------------------------- DXF 출력 */
+  function writeDxf(baseText, prims, patterns) {
+    const lines = baseText.split('\n');
+    // *Model_Space 블록 레코드 핸들
+    let owner = '1F';
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] === '*Model_Space' && lines[i - 1].trim() === '2') {
+        for (let m = i; m > i - 30; m--) if (lines[m].trim() === '5') { owner = lines[m + 1].trim(); break; }
+        break;
+      }
+    }
+    const hsIdx = lines.indexOf('$HANDSEED');
+    let seed = parseInt(lines[hsIdx + 2].trim(), 16);
+    const H = () => (seed++).toString(16).toUpperCase();
+    const out = [];
+    const g = (c, v) => { out.push((c < 10 ? '  ' : c < 100 ? ' ' : '') + c); out.push(String(v)); };
+    const f = x => Number.isInteger(x) ? x.toFixed(1) : String(r4(x));
+    const head = (type, p, sub) => {
+      g(0, type); g(5, H()); g(330, owner); g(100, 'AcDbEntity'); g(8, p.layer || '0');
+      if (p.lt) g(6, p.lt);
+      if (p.c != null && p.c !== 256) g(62, p.c);
+      if (p.lw) g(370, p.lw);
+      if (p.lts) g(48, p.lts);
+      g(100, sub);
+    };
+    const ALIGN = { L: [0, 0], LB: [0, 0], BC: [1, 1], MC: [1, 2], C: [1, 0], R: [2, 0], BL: [0, 1], ML: [0, 2] };
+    prims.forEach(p => {
+      if (p.t === 'line') { head('LINE', p, 'AcDbLine'); g(10, f(p.p[0])); g(20, f(p.p[1])); g(30, '0.0'); g(11, f(p.q[0])); g(21, f(p.q[1])); g(31, '0.0'); }
+      else if (p.t === 'poly') {
+        head('LWPOLYLINE', p, 'AcDbPolyline'); g(90, p.pts.length); g(70, p.closed ? 1 : 0); g(43, '0.0');
+        p.pts.forEach(q => { g(10, f(q[0])); g(20, f(q[1])); });
+      } else if (p.t === 'circle') { head('CIRCLE', p, 'AcDbCircle'); g(10, f(p.p[0])); g(20, f(p.p[1])); g(30, '0.0'); g(40, f(p.r)); }
+      else if (p.t === 'solid') {
+        const v = p.pts.length === 3 ? [p.pts[0], p.pts[1], p.pts[2], p.pts[2]] : [p.pts[0], p.pts[1], p.pts[3], p.pts[2]];
+        head('SOLID', p, 'AcDbTrace'); [10, 11, 12, 13].forEach((c, i) => { g(c, f(v[i][0])); g(c + 10, f(v[i][1])); g(c + 20, '0.0'); });
+      } else if (p.t === 'text') {
+        const [ha, va] = ALIGN[p.align] || [0, 0];
+        head('TEXT', p, 'AcDbText'); g(10, f(p.p[0])); g(20, f(p.p[1])); g(30, '0.0'); g(40, f(p.h)); g(1, p.s);
+        if (p.rot) g(50, f(((p.rot % 360) + 360) % 360)); g(7, p.style || 'Standard');
+        if (ha) g(72, ha);
+        if (ha || va) { g(11, f(p.p[0])); g(21, f(p.p[1])); g(31, '0.0'); }
+        g(100, 'AcDbText'); if (va) g(73, va);
+      } else if (p.t === 'hatch') {
+        const solidFill = p.pattern === 'SOLID';
+        head('HATCH', p, 'AcDbHatch');
+        g(10, '0.0'); g(20, '0.0'); g(30, '0.0'); g(210, '0.0'); g(220, '0.0'); g(230, '1.0');
+        g(2, solidFill ? 'SOLID' : p.pattern); g(70, solidFill ? 1 : 0); g(71, 0); g(91, p.polys.length);
+        p.polys.forEach(pp => {
+          const pts = (pp.length > 2 && V.len(V.sub(pp[0], pp[pp.length - 1])) < 1e-9) ? pp.slice(0, -1) : pp;
+          g(92, 3); g(72, 0); g(73, 1); g(93, pts.length); pts.forEach(q => { g(10, f(q[0])); g(20, f(q[1])); }); g(97, 0);
+        });
+        g(75, 0); g(76, 1);
+        if (!solidFill) {
+          const def = (patterns && patterns[p.pattern]) || [];
+          const s = p.scale || 1;
+          g(52, f(p.angle || 0)); g(41, f(s)); g(77, 0); g(78, def.length);
+          def.forEach(([ang, base, off, dashes]) => {
+            g(53, f(ang)); g(43, f(base[0] * s)); g(44, f(base[1] * s)); g(45, f(off[0] * s)); g(46, f(off[1] * s));
+            g(79, dashes.length); dashes.forEach(d => g(49, f(d * s)));
+          });
+        }
+        g(98, 0);
+      }
+    });
+    // ENTITIES 섹션 끝에 삽입
+    let ent = lines.indexOf('ENTITIES'), end = ent;
+    while (!(lines[end] === 'ENDSEC' && lines[end - 1].trim() === '0')) end++;
+    lines.splice(end - 1, 0, ...out);
+    lines[hsIdx + 2] = seed.toString(16).toUpperCase();
+    return lines.join('\n');
+  }
+
+  /* -------------------------------------------------------------- PDF 출력 */
+  const ACI = { 1: [255, 0, 0], 2: [230, 200, 0], 3: [0, 200, 0], 4: [0, 190, 220], 5: [0, 0, 255], 6: [255, 0, 255], 7: [0, 0, 0], 8: [128, 128, 128], 9: [170, 170, 170], 21: [255, 140, 100], 30: [255, 127, 0], 150: [0, 127, 255] };
+  const LAYER_COLOR = { '0': 7, 'DIM': 8, '도면층3': 6, '도면층4': 8, '바탕선': 7, '공급자배관_저압': 7, '도로': 7, '지장물': 8, '테두리': 6, '도면층2': 3, '지하수위': 150 };
+
+  async function buildPdf(PDFLib, fontkit, fontBytes, basePdfBytes, prims, meta) {
+    const { PDFDocument, rgb, degrees, pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, setLineWidth, setStrokingRgbColor, stroke, setFillingRgbColor, fill } = PDFLib;
+    const doc = await PDFDocument.load(basePdfBytes);
+    const fk = fontkit.create(fontBytes instanceof Uint8Array ? fontBytes : new Uint8Array(fontBytes));
+    const upm = fk.unitsPerEm;
+    const glyphCache = {};
+    // 글자를 외곽선(벡터)으로 그림: 글꼴 임베딩 없이 어느 PDF 뷰어에서나 동일하게 보임
+    const textPath = (s) => {
+      const run = fk.layout(s); let x = 0, d = '';
+      run.glyphs.forEach((gl, i) => {
+        const key = gl.id; let svg = glyphCache[key];
+        if (svg === undefined) { svg = glyphCache[key] = gl.path.commands.length ? gl.path : null; }
+        if (svg) {
+          const pos = run.positions[i];
+          const pth = svg.scale(1, -1).translate(x + pos.xOffset, -pos.yOffset);
+          d += pth.toSVG() + ' ';
+        }
+        x += run.positions[i].xAdvance;
+      });
+      return { d, adv: x };
+    };
+    const page = doc.getPages()[0];
+    const { width: PW, height: PH } = page.getSize();
+    const [SX0, SY0, SX1, SY1] = meta.sheet;
+    const sx = PW / (SX1 - SX0), sy = PH / (SY1 - SY0);
+    const T = p => [(p[0] - SX0) * sx, (p[1] - SY0) * sy];
+    const colorOf = p => { let c = p.c; if (c == null || c === 256 || c === 0) c = LAYER_COLOR[p.layer] ?? 7; const a = ACI[c] || [0, 0, 0]; return a; };
+    const RGB = a => rgb(a[0] / 255, a[1] / 255, a[2] / 255);
+    const lwPt = p => Math.max(0.12, ((p.lw || 25) / 100) * 0.6) * 72 / 25.4;
+    const dash = p => p.lt === 'HIDDEN' ? [3, 1.5] : undefined;
+    const polyPath = pts => pts.map((q, i) => { const [x, y] = T(q); return (i ? 'L' : 'M') + x.toFixed(2) + ' ' + (PH - y).toFixed(2); }).join(' ');
+    for (const p of prims) {
+      const col = RGB(colorOf(p));
+      if (p.t === 'line') {
+        const [x1, y1] = T(p.p), [x2, y2] = T(p.q);
+        page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness: lwPt(p), color: col, dashArray: dash(p) });
+      } else if (p.t === 'poly') {
+        const pts = p.closed ? [...p.pts, p.pts[0]] : p.pts;
+        page.drawSvgPath(polyPath(pts), { x: 0, y: PH, borderColor: col, borderWidth: lwPt(p), borderDashArray: dash(p) });
+      } else if (p.t === 'circle') {
+        const [x, y] = T(p.p);
+        page.drawEllipse({ x, y, xScale: p.r * sx, yScale: p.r * sy, borderColor: col, borderWidth: lwPt(p), borderDashArray: dash(p) });
+      } else if (p.t === 'solid') {
+        page.drawSvgPath(polyPath(p.pts) + ' Z', { x: 0, y: PH, color: col });
+      } else if (p.t === 'hatch') {
+        if (p.pattern === 'SOLID') { p.polys.forEach(pp => page.drawSvgPath(polyPath(pp) + ' Z', { x: 0, y: PH, color: col })); continue; }
+        // 패턴: 영역으로 클립한 뒤 사선/점 표현
+        p.polys.forEach(pp => {
+          const tp = pp.map(T);
+          let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; tp.forEach(([x, y]) => { a = Math.min(a, x); b = Math.min(b, y); c = Math.max(c, x); d = Math.max(d, y); });
+          const ops = [pushGraphicsState()];
+          tp.forEach(([x, y], i) => ops.push(i ? lineTo(x, y) : moveTo(x, y))); ops.push(closePath(), clip(), endPath());
+          const cc = colorOf(p);
+          if (p.pattern === 'ANSI31') {
+            ops.push(setLineWidth(0.3), setStrokingRgbColor(cc[0] / 255, cc[1] / 255, cc[2] / 255));
+            const step = Math.max(1.2, 3.175 * (p.scale || 1) * sx);
+            for (let t = a - (d - b); t < c; t += step) { ops.push(moveTo(t, b), lineTo(t + (d - b), d)); }
+            ops.push(stroke());
+          } else {
+            ops.push(setFillingRgbColor(0.85 + 0.15 * cc[0] / 255, 0.85 + 0.15 * cc[1] / 255, 0.85 + 0.15 * cc[2] / 255));
+            tp.forEach(([x, y], i) => ops.push(i ? lineTo(x, y) : moveTo(x, y))); ops.push(closePath(), fill());
+            ops.push(setFillingRgbColor(cc[0] / 255, cc[1] / 255, cc[2] / 255));
+            let seed = 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+            const n = Math.min(400, Math.round((c - a) * (d - b) / 4));
+            for (let i = 0; i < n; i++) { const x = a + rnd() * (c - a), y = b + rnd() * (d - b), r = 0.25 + rnd() * 0.35; ops.push(moveTo(x - r, y), lineTo(x + r, y), lineTo(x, y + r * 1.4), closePath()); }
+            ops.push(fill());
+          }
+          ops.push(popGraphicsState());
+          page.pushOperators(...ops);
+        });
+      } else if (p.t === 'text') {
+        const size = p.h * sy / 0.72, k = size / upm;
+        const tp = textPath(p.s); if (!tp.d.trim()) continue;
+        const w = tp.adv * k, capH = p.h * sy;
+        const [ha, va] = ({ L: [0, 0], BC: [0.5, -0.12], MC: [0.5, 0.5], C: [0.5, 0], R: [1, 0] })[p.align] || [0, 0];
+        const r = (p.rot || 0) * deg;
+        const dx = -w * ha, dy = -capH * va;
+        const [x, y] = T(p.p);
+        page.drawSvgPath(tp.d, { x: x + dx * Math.cos(r) - dy * Math.sin(r), y: y + dx * Math.sin(r) + dy * Math.cos(r), scale: k, rotate: degrees(p.rot || 0), color: col, borderWidth: 0 });
+      }
+    }
+    return await doc.save();
+  }
+
+  return { readGisDxf, guessPipeLayer, snapTee, readOrderSheet, splitAddr, buildDrawing, writeDxf, buildPdf, baseKeyFor, decodeLines, SEG_LABEL };
+});
+
+</script>
+<script>
+(function(){
+const $ = id => document.getElementById(id);
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2600); }
+const E = window.ExcavEngine;
+const S = { pkg:null, order:null, row:null, gis:null, pipeLayer:null, tee:null, dxf:null, pdf:null, fontBytes:null };
+
+/* ---------- IndexedDB (양식 패키지 보관) */
+const DB='srbExcavDrawing', ST='kv';
+function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(DB,1); r.onupgradeneeded=()=>r.result.createObjectStore(ST); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function kvGet(k){ const db=await idb(); return new Promise((res,rej)=>{ const q=db.transaction(ST).objectStore(ST).get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+async function kvSet(k,v){ const db=await idb(); return new Promise((res,rej)=>{ const t=db.transaction(ST,'readwrite'); t.objectStore(ST).put(v,k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); }
+function setTplStatus(){
+  const s=$('tplStatus');
+  if(S.pkg){ s.className='status ok'; s.textContent='· 등록됨 (조합 '+Object.keys(S.pkg.bases).length+'종)'; $('st0').classList.add('done'); $('btnTpl').textContent='양식 패키지 다시 등록'; }
+  else { s.className='status no'; s.textContent='· 등록 필요'; }
+}
+(async()=>{ try{ S.pkg = await kvGet('pkg') || null; }catch(e){ S.pkg=null; } setTplStatus(); })();
+$('btnTpl').onclick=()=>$('fTpl').click();
+$('fTpl').onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{
+    const o=JSON.parse(await f.text());
+    if(o.kind!=='srb-excav-drawing-templates' || !o.bases) throw new Error('굴착허가 도면 양식 패키지가 아닙니다');
+    await kvSet('pkg',o); S.pkg=o; setTplStatus(); toast('양식 패키지를 등록했습니다');
+  }catch(err){ alert('등록 실패: '+err.message); }
+  e.target.value='';
+};
+
+/* ---------- 엑셀 */
+$('btnXls').onclick=()=>$('fXls').click();
+$('fXls').onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+    S.order=E.readOrderSheet(XLSX,wb); $('xlsName').textContent=f.name+' · '+S.order.sheet+' · '+S.order.rows.length+'건';
+    renderOrders();
+  }catch(err){ alert('엑셀을 읽지 못했습니다: '+err.message); }
+  e.target.value='';
+};
+const SEGNAME={ASP:'A.S.P',CONC:"CON'C",BRK:'보도',UNPAVED:'비포장'};
+function renderOrders(){
+  const rows=S.order.rows;
+  let h='<table class="list"><thead><tr><th>NO</th><th>수요처명</th><th>주소</th><th>기존관</th><th>신설</th><th>연장</th><th>포장 구분</th></tr></thead><tbody>';
+  rows.forEach((r,i)=>{ h+=`<tr data-i="${i}"><td>${r.no}</td><td>${r.name}</td><td>${r.addr}</td><td>${r.mainMat} ${r.mainDia}A</td><td>${r.newDia}A</td><td>${r.total}M</td><td>${r.segs.map(s=>SEGNAME[s.type]+' '+s.len+'M').join(' + ')}</td></tr>`; });
+  h+='</tbody></table>';
+  $('orderWrap').innerHTML=h;
+  $('orderWrap').querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>pickRow(+tr.dataset.i));
+}
+function pickRow(i){
+  const r=S.order.rows[i]; S.row=r;
+  $('orderWrap').querySelectorAll('tbody tr').forEach(tr=>tr.classList.toggle('sel',+tr.dataset.i===i));
+  const a=E.splitAddr(r.addr);
+  $('vDong').value=a.dong; $('vJibun').value=a.jibun; $('vName').value=r.name.replace(/\s+/g,'');
+  $('vMain').value=r.mainDia||''; $('vNew').value=r.newDia||63;
+  setSegs(r.segs.length?r.segs:[{type:'ASP',len:r.total||0}]);
+  $('st1').classList.add('done'); drawMap();
+}
+
+/* ---------- 포장 구간 편집 */
+function setSegs(list){
+  $('segs').innerHTML='';
+  list.forEach(s=>addSeg(s.type,s.len)); updSum();
+}
+function addSeg(type='ASP',len=''){
+  const d=document.createElement('div'); d.className='seg';
+  d.innerHTML=`<select>${Object.entries(SEGNAME).map(([k,v])=>`<option value="${k}" ${k===type?'selected':''}>${v}</option>`).join('')}</select>
+    <input type="number" step="0.1" min="0" value="${len}" placeholder="연장(M)"> <span style="font-size:12px;color:var(--muted)">M</span>
+    <button class="btn secondary sm">삭제</button>`;
+  d.querySelector('button').onclick=()=>{ d.remove(); updSum(); };
+  d.querySelectorAll('select,input').forEach(x=>x.oninput=updSum);
+  $('segs').appendChild(d);
+}
+function getSegs(){ return [...$('segs').querySelectorAll('.seg')].map(d=>({type:d.querySelector('select').value,len:parseFloat(d.querySelector('input').value)||0})).filter(s=>s.len>0); }
+function updSum(){ const L=getSegs().reduce((a,s)=>a+s.len,0); $('segSum').textContent='총 '+(Math.round(L*10)/10)+'M'; drawMap(); }
+$('segAdd').onclick=()=>{ addSeg('BRK',''); };
+$('vDate').value=new Date(Date.now()+9*3600e3).toISOString().slice(0,10);
+
+/* ---------- GIS 지도 */
+$('btnGis').onclick=()=>$('fGis').click();
+$('fGis').onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{
+    S.gis=E.readGisDxf(await f.arrayBuffer()); S.tee=null; $('teeInfo').style.display='none';
+    S.pipeLayer=E.guessPipeLayer(S.gis);
+    const sel=$('pipeLayer'); sel.innerHTML='';
+    S.gis.layers.forEach((l,i)=>{ const o=document.createElement('option'); o.value=l.name;
+      const cols=Object.keys(l.colors).join(','); const nm=/�/.test(l.name)?('레이어 '+(i+1)):l.name;
+      o.textContent=`${nm} · 선 ${l.count}개 · 색 ${cols}${l.name===S.pipeLayer?' (추정)':''}`; if(l.name===S.pipeLayer) o.selected=true; sel.appendChild(o); });
+    fitView(); drawMap(); $('st2').classList.remove('done');
+    toast('수치지도를 불러왔습니다. 인입 위치를 클릭하세요.');
+  }catch(err){ alert('DXF를 읽지 못했습니다: '+err.message); }
+  e.target.value='';
+};
+$('pipeLayer').onchange=()=>{ S.pipeLayer=$('pipeLayer').value; S.tee=null; $('teeInfo').style.display='none'; drawMap(); };
+const cv=$('map'), ctx=cv.getContext('2d');
+let view={s:1,ox:0,oy:0};
+function resize(){ const r=cv.getBoundingClientRect(); const dpr=window.devicePixelRatio||1; cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+function fitView(){
+  resize(); if(!S.gis) return;
+  const pts=[]; S.gis.polys.forEach(p=>{ if(!p.frame) p.pts.forEach(q=>pts.push(q)); });
+  let [x0,y0,x1,y1]=[Infinity,Infinity,-Infinity,-Infinity]; pts.forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);});
+  const r=cv.getBoundingClientRect(); const s=Math.min(r.width/(x1-x0),r.height/(y1-y0))*0.92;
+  view={s,ox:r.width/2-(x0+x1)/2*s,oy:r.height/2+(y0+y1)/2*s};
+}
+const w2s=([x,y])=>[x*view.s+view.ox,-y*view.s+view.oy];
+const s2w=([u,v])=>[(u-view.ox)/view.s,-(v-view.oy)/view.s];
+function drawMap(){
+  const r=cv.getBoundingClientRect(); ctx.clearRect(0,0,r.width,r.height);
+  if(!S.gis){ ctx.fillStyle='#8a8780'; ctx.font='13px sans-serif'; ctx.textAlign='center'; ctx.fillText('수치지도 DXF를 선택하세요',r.width/2,r.height/2); return; }
+  S.gis.polys.forEach(p=>{
+    if(p.frame) return;
+    const pipe=p.layer===S.pipeLayer;
+    ctx.strokeStyle=pipe?'#1f3fdf':(p.color===8||p.color===7?'#555':'#aaa'); ctx.lineWidth=pipe?2.2:1;
+    ctx.beginPath(); p.pts.forEach((q,i)=>{ const [u,v]=w2s(q); i?ctx.lineTo(u,v):ctx.moveTo(u,v); }); if(p.closed) ctx.closePath(); ctx.stroke();
+  });
+  ctx.fillStyle='#333'; ctx.font='11px sans-serif'; ctx.textAlign='center';
+  S.gis.texts.forEach(t=>{ if(/^\d+(-\d+)?$/.test(t.s)||/PE|LP/.test(t.s)){ const [u,v]=w2s([t.x,t.y]); ctx.fillText(t.s,u,v); } });
+  if(S.tee){
+    const L=getSegs().reduce((a,s)=>a+s.len,0)||6;
+    const a=w2s(S.tee.foot), b=w2s([S.tee.foot[0]+S.tee.dir[0]*L,S.tee.foot[1]+S.tee.dir[1]*L]);
+    ctx.strokeStyle='#e000e0'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.strokeStyle='#000'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(a[0],a[1],5,0,7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(a[0],a[1],2,0,7); ctx.fill();
+  }
+}
+let drag=null;
+cv.addEventListener('mousedown',e=>{ drag={x:e.offsetX,y:e.offsetY,ox:view.ox,oy:view.oy,moved:false}; });
+cv.addEventListener('mousemove',e=>{ if(!drag) return; const dx=e.offsetX-drag.x, dy=e.offsetY-drag.y; if(Math.abs(dx)+Math.abs(dy)>4) drag.moved=true; if(drag.moved){ view.ox=drag.ox+dx; view.oy=drag.oy+dy; drawMap(); } });
+cv.addEventListener('mouseup',e=>{
+  if(drag && !drag.moved && S.gis && S.pipeLayer){
+    const w=s2w([e.offsetX,e.offsetY]); const t=E.snapTee(S.gis,S.pipeLayer,w);
+    if(t){ S.tee=t; $('teeInfo').style.display=''; $('teeInfo').textContent='분기점 지정됨 · 배관까지 '+t.dist.toFixed(1)+'m 지점 클릭'; $('st2').classList.add('done'); drawMap(); }
+  }
+  drag=null;
+});
+cv.addEventListener('mouseleave',()=>{ drag=null; });
+function zoomAt(f,u,v){ const w=s2w([u,v]); view.s*=f; view.ox=u-w[0]*view.s; view.oy=v+w[1]*view.s; drawMap(); }
+cv.addEventListener('wheel',e=>{ e.preventDefault(); zoomAt(e.deltaY<0?1.2:1/1.2,e.offsetX,e.offsetY); },{passive:false});
+$('zIn').onclick=()=>{ const r=cv.getBoundingClientRect(); zoomAt(1.3,r.width/2,r.height/2); };
+$('zOut').onclick=()=>{ const r=cv.getBoundingClientRect(); zoomAt(1/1.3,r.width/2,r.height/2); };
+$('zFit').onclick=()=>{ fitView(); drawMap(); };
+window.addEventListener('resize',()=>{ resize(); drawMap(); });
+resize(); drawMap();
+
+/* ---------- 생성 */
+async function fontBytes(){ if(!S.fontBytes){ const r=await fetch('NotoSansKR-Subset.otf'); if(!r.ok) throw new Error('글꼴 파일(NotoSansKR-Subset.otf)을 불러오지 못했습니다'); S.fontBytes=new Uint8Array(await r.arrayBuffer()); } return S.fontBytes; }
+function fname(ext){ return `굴착허가도면_${$('vDong').value}${$('vJibun').value}_${$('vName').value}.${ext}`; }
+function download(data,name,type){ const b=new Blob([data],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500); }
+$('btnMake').onclick=async()=>{
+  const miss=[]; if(!S.pkg) miss.push('표준 양식 패키지 등록'); if(!S.gis) miss.push('수치지도 DXF'); if(!S.tee) miss.push('지도에서 인입 위치 클릭');
+  const segs=getSegs(); if(!segs.length) miss.push('포장 구간 연장');
+  if(!$('vMain').value) miss.push('기존관 관경'); if(!$('vJibun').value) miss.push('번지');
+  if(miss.length){ alert('먼저 확인해 주세요:\n- '+miss.join('\n- ')); return; }
+  $('busy').style.display='inline'; $('btnMake').disabled=true;
+  try{
+    const d=$('vDate').value.split('-'); const date=d.length===3?`${d[0]}.${d[1]}.${d[2]}.`:$('vDate').value;
+    const c={ dong:$('vDong').value.trim(), jibun:$('vJibun').value.trim(), name:$('vName').value.trim(), date,
+      mainDia:+$('vMain').value, newDia:+$('vNew').value||63, segs, depthMain:parseFloat($('vDepth').value)||1.2,
+      rainBox:$('vRain').checked?{w:parseFloat($('vRainW').value)||0.6,d:parseFloat($('vRainD').value)||0.6}:null,
+      gis:S.gis, pipeLayer:S.pipeLayer, tee:S.tee };
+    const r=E.buildDrawing(S.pkg,c);
+    const base=S.pkg.bases[r.baseKey];
+    S.dxf=E.writeDxf(base.dxf,r.prims,S.pkg.symbols.patterns);
+    const pdfBase=Uint8Array.from(atob(base.pdf),ch=>ch.charCodeAt(0));
+    S.pdf=await E.buildPdf(PDFLib,window.fontkit,await fontBytes(),pdfBase,r.prims,S.pkg.meta);
+    const w=$('warn'); if(r.warnings.length){ w.style.display='block'; w.innerHTML=r.warnings.join('<br>'); } else w.style.display='none';
+    const pv=$('preview'); if(pv._url) URL.revokeObjectURL(pv._url); pv._url=URL.createObjectURL(new Blob([S.pdf],{type:'application/pdf'})); pv.src=pv._url; pv.style.display='block';
+    $('btnPdf').disabled=false; $('btnDxf').disabled=false; $('st3').classList.add('done');
+    toast('도면을 만들었습니다');
+  }catch(err){ console.error(err); alert('도면 생성 중 오류: '+err.message); }
+  finally{ $('busy').style.display='none'; $('btnMake').disabled=false; }
+};
+$('btnPdf').onclick=()=>S.pdf&&download(S.pdf,fname('pdf'),'application/pdf');
+$('btnDxf').onclick=()=>S.dxf&&download(S.dxf,fname('dxf'),'application/dxf');
+setSegs([]);
+})();
+</script>
+</body>
+</html>

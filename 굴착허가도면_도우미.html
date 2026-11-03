@@ -138,6 +138,9 @@
       <label class="f">신설 인입관 관경 (A)<input type="number" id="vNew" value="63"></label>
       <label class="f">기존관 심도 (M)<input type="number" id="vDepth" step="0.1" placeholder="미입력 시 1.2"></label>
       <label class="f">작성일<input type="date" id="vDate"></label>
+      <label class="f">DESIGNED BY<input type="text" id="vDesigner" value="배준호"></label>
+      <label class="f">MANAGER<input type="text" id="vManager" value="배준호"></label>
+      <label class="f">APPROVED BY<input type="text" id="vApprover" value="이주현"></label>
     </div>
     <div style="margin-top:12px;font-size:12px;color:var(--muted)">포장 구간 (분기점 → 건물 순서) <span id="segSum" class="badge" style="margin-left:6px"></span></div>
     <div id="segs"></div>
@@ -628,6 +631,10 @@
     [`${ND}A`, `${fmt1(L)}M`, 'KSM3514', 'LP'].forEach((v, j) => text(v, [TB.cols[j + 1], TB.sum], 1.611, { style: '지명', layer: '바탕선', c: 256 }));
     text(`${c.dong} ${c.name} 인입 공급관`, M.title.name, 1.9465, { style: '굴림', layer: 'DIM', c: 7 });
     text(c.date, M.title.date, 1.6926, { style: 'Standard', layer: 'DIM', c: 256 });
+    const spaced = n => String(n || '').trim().replace(/\s+/g, '').split('').join('  ');
+    [['designer', c.designer], ['manager', c.manager], ['approver', c.approver]].forEach(([k, v]) => {
+      if (v && M.title[k]) text(spaced(v), M.title[k], 1.6926, { style: 'Standard', layer: 'DIM', c: 256 });
+    });
 
     const bk = baseKeyFor(segs);
     return { prims: P, baseKey: bk.key, warnings: bk.warn, L };
@@ -957,7 +964,9 @@ $('btnMake').onclick=async()=>{
     const c={ dong:$('vDong').value.trim(), jibun:$('vJibun').value.trim(), name:$('vName').value.trim(), date,
       mainDia:+$('vMain').value, newDia:+$('vNew').value||63, segs, depthMain:parseFloat($('vDepth').value)||1.2,
       rainBox:$('vRain').checked?{w:parseFloat($('vRainW').value)||0.6,d:parseFloat($('vRainD').value)||0.6}:null,
-      gis:S.gis, pipeLayer:S.pipeLayer, tee:S.tee };
+      gis:S.gis, pipeLayer:S.pipeLayer, tee:S.tee,
+      designer:$('vDesigner').value, manager:$('vManager').value, approver:$('vApprover').value };
+    try{ localStorage.setItem('excavSigners',JSON.stringify({d:c.designer,m:c.manager,a:c.approver})); }catch(e){}
     const r=E.buildDrawing(S.pkg,c);
     const base=S.pkg.bases[r.baseKey];
     S.dxf=E.writeDxf(base.dxf,r.prims,S.pkg.symbols.patterns);
@@ -973,6 +982,7 @@ $('btnMake').onclick=async()=>{
 $('btnPdf').onclick=()=>S.pdf&&download(S.pdf,fname('pdf'),'application/pdf');
 $('btnDxf').onclick=()=>S.dxf&&download(S.dxf,fname('dxf'),'application/dxf');
 setSegs([]);
+try{ const sg=JSON.parse(localStorage.getItem('excavSigners')||'null'); if(sg){ $('vDesigner').value=sg.d||''; $('vManager').value=sg.m||''; $('vApprover').value=sg.a||''; } }catch(e){}
 })();
 </script>
 </body>

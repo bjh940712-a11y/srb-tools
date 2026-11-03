@@ -502,7 +502,26 @@
       const p = W2P([t.x, t.y]);
       if (p[0] > R[0] + 4 && p[0] < R[2] - 10 && p[1] > R[1] + 3 && p[1] < R[3] - 4) text(t.s, p, 2.4, { style: 'Standard' });
     });
-    const lp = W2P(V.add(routeEndW, V.mul(routeW ? dir : endDirW, 9)));
+    // 수요처 표기 위치: 인입 끝점이 들어있는(또는 가장 가까운) 건물 외곽선의 중심
+    const lotPoly = (() => {
+      const inPoly = (q, pts) => { let c_ = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if (((yi > q[1]) !== (yj > q[1])) && (q[0] < (xj - xi) * (q[1] - yi) / (yj - yi) + xi)) c_ = !c_; } return c_; };
+      const area = pts => { let a_ = 0, cx = 0, cy = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const f_ = pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1]; a_ += f_; cx += (pts[j][0] + pts[i][0]) * f_; cy += (pts[j][1] + pts[i][1]) * f_; } a_ /= 2; return { a: Math.abs(a_), c: a_ ? [cx / (6 * a_), cy / (6 * a_)] : pts[0] }; };
+      const probe = V.add(routeEndW, V.mul(endDirW, 0.5));
+      let best = null;
+      c.gis.polys.forEach(p => {
+        if (p.frame || p.layer === c.pipeLayer || p.pts.length < 4) return;
+        const closed = p.closed || V.len(V.sub(p.pts[0], p.pts[p.pts.length - 1])) < 0.05;
+        if (!closed) return;
+        const A = area(p.pts); if (A.a < 8 || A.a > 3000) return;
+        const inside = inPoly(probe, p.pts) || inPoly(routeEndW, p.pts);
+        const d = inside ? 0 : nearestOnPoly(p.pts.concat([p.pts[0]]), routeEndW).dist;
+        if (d > 6) return;
+        const sc = d * 1000 + (inside ? A.a : 0);
+        if (!best || sc < best.sc) best = { sc, c: A.c };
+      });
+      return best;
+    })();
+    const lp = W2P(lotPoly ? lotPoly.c : V.add(routeEndW, V.mul(routeW ? dir : endDirW, 9)));
     text(c.jibun, V.add(lp, [0, 3]), 3.9, { c: 3, style: 'GHS', align: 'MC' });
     text(c.name, V.sub(lp, [0, 2.5]), 3.9, { c: 3, style: 'GHS', align: 'MC' });
     // 기존관 라벨: 분기점에서 12~22m 떨어진 배관 위, 인입 반대쪽 우선
@@ -597,7 +616,12 @@
       poly(DP, { c: 6, lw: 50 });
       const tick = (s, half, col, lw) => { const { p, t } = at(s), n = V.perp(t); line(V.add(p, V.mul(n, half)), V.sub(p, V.mul(n, half)), { c: col, lw }); };
       cum.slice(0, -1).forEach(([, b]) => tick(b, 3.5, 7, 18));
-      { const { p, t } = at(L), n = V.perp(t); dpl([V.add(p, V.mul(n, 5)), V.sub(p, V.mul(n, 5))], { c: 1, lw: 25 }); }
+      { // 부지 경계(빨간선): 기존관과 평행, 경로에서 건물 쪽으로 가장 먼 지점을 지남
+        let um = -Infinity, X = DP[DP.length - 1];
+        DP.forEach(q => { const u = V.dot(V.sub(q, O), uS); if (u > um - 1e-6) { um = u; X = q; } });
+        const tEnd = at(L).t;
+        if (Math.abs(V.dot(tEnd, uA)) > 0.9) X = V.add(X, V.mul(uS, 6));    // 마지막 구간이 배관과 평행(ㄱ자)이면 조금 바깥에
+        dpl([V.sub(X, V.mul(uA, 400)), V.add(X, V.mul(uA, 400))], { c: 1, lw: 25 }); }
       if (rb) {
         const A = at(rbStart), B = at(Math.min(L, rbStart + rb.w)), n = V.perp(A.t), h = 2.8;
         const q = [V.add(A.p, V.mul(n, h)), V.add(B.p, V.mul(n, h)), V.sub(B.p, V.mul(n, h)), V.sub(A.p, V.mul(n, h))];

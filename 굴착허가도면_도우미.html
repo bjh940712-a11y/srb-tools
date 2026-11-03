@@ -116,6 +116,12 @@
         <select id="pipeLayer" style="min-width:220px"></select></label>
       <span class="badge" id="teeInfo" style="display:none"></span>
     </div>
+    <div class="row" id="routeTools">
+      <label class="chk"><input type="checkbox" id="ortho" checked> 직각 맞춤</label>
+      <button class="btn secondary sm" id="rUndo" disabled>마지막 점 취소</button>
+      <button class="btn secondary sm" id="rReset" disabled>분기점·경로 다시 지정</button>
+      <span class="hint" style="margin:0" id="routeHint">① 건물 쪽을 클릭해 분기점을 정하세요.</span>
+    </div>
     <div class="mapwrap">
       <canvas id="map"></canvas>
       <div class="maptools">
@@ -124,7 +130,9 @@
         <button class="btn secondary sm" id="zFit">전체</button>
       </div>
     </div>
-    <div class="hint">지도에서 <b>건물(부지) 쪽 인입 위치</b>를 클릭하면 가장 가까운 기존관 위에 분기점이 잡히고, 배관과 직각 방향으로 인입관이 그려집니다. (휠: 확대/축소, 드래그: 이동)</div>
+    <div class="hint">① 지도에서 <b>건물(부지) 쪽</b>을 클릭하면 가장 가까운 기존관 위에 분기점이 잡히고, 배관과 직각인 직선 인입관이 표시됩니다.
+      ② 꺾어야 하면 이어서 <b>꺾이는 점을 차례로 클릭</b>하세요(ㄱ·ㄷ자 등). 마지막 클릭이 인입 끝점입니다. '직각 맞춤'을 켜 두면 각 구간이 앞 구간과 직각·평행으로 맞춰집니다.
+      도면의 연장은 경로 길이와 관계없이 발주서(포장 구간) 값으로 표기됩니다. (휠: 확대/축소, 드래그: 이동)</div>
   </div>
 
   <!-- 3. 정보 -->
@@ -446,8 +454,29 @@
     /* ---------- 평면도 1/500 */
     const PL = M.plan, K = 2.0;
     const R = [PL[0] + .3, PL[1] + .3, PL[2] - .3, PL[3] - .3];
-    const tee = c.tee.foot, dir = c.tee.dir;
-    const PC = V.sub([(PL[0] + PL[2]) / 2, (PL[1] + PL[3]) / 2], V.mul(dir, L * K * 0.5 + 12));
+    const tee = c.tee.foot;
+    // 인입 경로: route(세계좌표, 분기점부터)가 2구간 이상이면 꺾인 경로, 아니면 직선
+    let routeW = Array.isArray(c.tee.route) && c.tee.route.length >= 2 ? c.tee.route : null;
+    let dir = c.tee.dir;
+    if (routeW) dir = V.norm(V.sub(routeW[1], routeW[0]));
+    if (routeW && routeW.length === 2) routeW = null;               // 1구간 = 직선
+    const routeLen = pts => pts.slice(1).reduce((a, q, i) => a + V.len(V.sub(q, pts[i])), 0);
+    const atLen = (pts, s0) => {                                       // 경로 위 길이 s 지점과 접선
+      let s = s0;
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const seg = V.sub(pts[i + 1], pts[i]), l = V.len(seg);
+        if (s <= l || i + 2 === pts.length) { const t = V.norm(seg); return { p: V.add(pts[i], V.mul(t, Math.min(s, l))), t, leg: i }; }
+        s -= l;
+      }
+      return { p: pts[0], t: [1, 0], leg: 0 };
+    };
+    let PC;
+    if (routeW) {
+      let a = Infinity, b = Infinity, cc = -Infinity, d = -Infinity;
+      routeW.forEach(([x, y]) => { a = Math.min(a, x); b = Math.min(b, y); cc = Math.max(cc, x); d = Math.max(d, y); });
+      const mid = [(a + cc) / 2, (b + d) / 2];
+      PC = V.sub(V.sub([(PL[0] + PL[2]) / 2, (PL[1] + PL[3]) / 2], V.mul(V.sub(mid, tee), K)), V.mul(dir, 6));
+    } else PC = V.sub([(PL[0] + PL[2]) / 2, (PL[1] + PL[3]) / 2], V.mul(dir, L * K * 0.5 + 12));
     const W2P = q => V.add(PC, V.mul(V.sub(q, tee), K));
     c.gis.polys.forEach(p => {
       if (p.frame) return;
@@ -459,8 +488,10 @@
         else poly(seg, { c: 8, lw: 13, layer: '지장물' });
       });
     });
-    const tp = W2P(tee), te = W2P(V.add(tee, V.mul(dir, L)));
-    poly([tp, te], { c: 6, lw: 50, layer: '도면층3' });
+    const tp = W2P(tee);
+    const routeEndW = routeW ? routeW[routeW.length - 1] : V.add(tee, V.mul(dir, L));
+    const endDirW = routeW ? V.norm(V.sub(routeEndW, routeW[routeW.length - 2])) : dir;
+    poly(routeW ? routeW.map(W2P) : [tp, W2P(routeEndW)], { c: 6, lw: 50, layer: '도면층3' });
     circ(tp, 1.25, { c: 7, layer: '0' });
     hatch([Array.from({ length: 16 }, (_, k) => V.add(tp, [0.45 * Math.cos(k * Math.PI / 8), 0.45 * Math.sin(k * Math.PI / 8)]))], 'SOLID', { c: 7 });
     circ(V.add(tp, V.mul(dir, 6)), 15.5, { c: 4, lw: 50, lt: 'HIDDEN', lts: 0.6 });
@@ -471,7 +502,7 @@
       const p = W2P([t.x, t.y]);
       if (p[0] > R[0] + 4 && p[0] < R[2] - 10 && p[1] > R[1] + 3 && p[1] < R[3] - 4) text(t.s, p, 2.4, { style: 'Standard' });
     });
-    const lp = W2P(V.add(tee, V.mul(dir, L + 9)));
+    const lp = W2P(V.add(routeEndW, V.mul(routeW ? dir : endDirW, 9)));
     text(c.jibun, V.add(lp, [0, 3]), 3.9, { c: 3, style: 'GHS', align: 'MC' });
     text(c.name, V.sub(lp, [0, 2.5]), 3.9, { c: 3, style: 'GHS', align: 'MC' });
     // 기존관 라벨: 분기점에서 12~22m 떨어진 배관 위, 인입 반대쪽 우선
@@ -498,7 +529,7 @@
       }
     }
     {
-      const l0 = W2P(V.add(tee, V.mul(dir, L * 0.5))), l1 = V.add(l0, [6, 9]), l2 = V.add(l1, [33, 0]);
+      const l0 = W2P(routeW ? atLen(routeW, routeLen(routeW) * 0.5).p : V.add(tee, V.mul(dir, L * 0.5))), l1 = V.add(l0, [6, 9]), l2 = V.add(l1, [33, 0]);
       poly([l0, l1, l2], { c: 21, layer: '바탕선' });
       text(`E/F S/T천공 ${MD}*${ND}A(L=${fmt1(L)}M)`, V.add(l1, [0.5, 0.6]), 1.82, { c: 21, style: '지명', layer: '바탕선' });
       text(`${c.jibun}번지 인입 공급관`, V.add(l1, [0.5, -2.6]), 1.82, { c: 21, style: '지명', layer: '바탕선' });
@@ -506,42 +537,98 @@
 
     /* ---------- DETAIL "A" (S=NONE) */
     const DT = M.detail, RD = [DT[0] + .5, DT[1] + .5, DT[2] - .5, DT[3] - .5];
-    const k = Math.min(11, 70 / L);
-    const O = [219334.0, 256446.0];
+    let O = [219334.0, 256446.0];
     const uA = [Math.cos(30 * deg), Math.sin(30 * deg)], uS = [Math.cos(150 * deg), Math.sin(150 * deg)];
+    // 꺾인 경로: 첫 구간이 uS 방향이 되도록 회전, 전체 길이를 발주서 연장 L로 맞춤
+    let qM = null;                                        // 상세도 좌표계(미터) 경로, 분기점 기준
+    if (routeW) {
+      // 상세도는 사투상(기존관 30°, 인입 150°): 현장의 '배관 직각' → uS, '배관 평행' → uA 로 옮김
+      let pd = c.tee.pipeDir ? V.norm(c.tee.pipeDir) : V.perp(dir);
+      pd = V.sub(pd, V.mul(dir, V.dot(pd, dir))); pd = V.norm(pd);
+      const sg = (dir[0] * pd[1] - dir[1] * pd[0]) < 0 ? 1 : -1;
+      const raw = routeW.map(q => { const v = V.sub(q, routeW[0]); const a_ = V.dot(v, dir), b_ = V.dot(v, pd) * sg; return V.add(V.mul(uS, a_), V.mul(uA, b_)); });
+      const f = L / routeLen(raw);
+      qM = raw.map(q => V.mul(q, f));
+    }
+    let k = Math.min(11, 70 / L);
+    if (qM) {   // 경로 전체가 상세도 가운데 오도록 축척과 분기점 위치(O)를 정함
+      let a = 0, b = 0, cc = 0, d = 0; qM.forEach(([x, y]) => { a = Math.min(a, x); b = Math.min(b, y); cc = Math.max(cc, x); d = Math.max(d, y); });
+      const W_ = DT[2] - DT[0] - 70, H_ = DT[3] - DT[1] - 50;
+      k = Math.min(18, W_ / Math.max(cc - a, 0.5), H_ / Math.max(d - b, 0.5));
+      O = V.sub([(DT[0] + DT[2]) / 2 + 8, (DT[1] + DT[3]) / 2 - 2], V.mul([(a + cc) / 2, (b + d) / 2], k));
+    }
     const D = (u, v) => V.add(O, V.add(V.mul(uS, u * k), V.mul(uA, v * k)));
-    const vr = 140 / k;
+    const vr = 140 / k, e = 11 / k;
     const dpl = (pts, o) => clipPoly(pts, RD).forEach(s => poly(s, o));
     dpl([D(0, -vr), D(0, vr)], { c: 5, lw: 35 });
-    cum.slice(0, -1).forEach(([, b]) => dpl([D(b, -vr), D(b, vr)], { c: 7, lw: 18 }));
-    dpl([D(L, -vr), D(L, 3.0), D(L + 90 / k, 3.0)], { c: 1, lw: 25 });
     dpl([D(-35 / k, -vr), D(-35 / k, vr)], { c: 1, lw: 25 });
     translatePrims(S.tee, O);
     const tt = S.tee_text;
     text(`SPLIT TEE ${MD}*${ND}A`, V.add(O, tt.tee.p), tt.tee.h, { rot: tt.tee.rot, style: tt.tee.style });
     text('보호철판 0.5M', V.add(O, tt.plate.p), tt.plate.h, { rot: tt.plate.rot, style: tt.plate.style, c: 21 });
     const J = V.add(O, S.J_rel), along = V.dot(S.J_rel, uA) / k;
-    poly([J, D(L, along)], { c: 6, lw: 50 });
-    if (rb) {
-      const q = [D(rbStart, -2.6 * 11 / k), D(rbStart + rb.w, -2.6 * 11 / k), D(rbStart + rb.w, 2.6 * 11 / k), D(rbStart, 2.6 * 11 / k)];
-      hatch([q], 'ANSI31', { c: 8, scale: 0.25 }); poly(q, { c: 8, closed: true });
-      const r0 = D(rbStart + 0.3, -2.0 * 11 / k), r1 = V.add(r0, [-6, -12]);
-      line(r0, r1, { c: 8 }); line(r1, V.add(r1, [-32, 0]), { c: 8 });
-      text(`우수BOX 폭${fmt1(rb.w)}M 심도${fmt1(rb.d)}M`, V.add(r1, [-31.5, 0.6]), 2.07, { c: 8 });
+    text(`기존관 LP PE ${MD}A 심도${fmt1(D_MAIN)}M`, D(0.22 * e, -4.45 * e), 2.07, { rot: 30, c: 5 });
+    text('도로', D(-1.6 * e, -3.5 * e), 3.0, { rot: 30 });
+    if (!qM) {
+      cum.slice(0, -1).forEach(([, b]) => dpl([D(b, -vr), D(b, vr)], { c: 7, lw: 18 }));
+      dpl([D(L, -vr), D(L, 3.0), D(L + 90 / k, 3.0)], { c: 1, lw: 25 });
+      poly([J, D(L, along)], { c: 6, lw: 50 });
+      if (rb) {
+        const q = [D(rbStart, -2.6 * e), D(rbStart + rb.w, -2.6 * e), D(rbStart + rb.w, 2.6 * e), D(rbStart, 2.6 * e)];
+        hatch([q], 'ANSI31', { c: 8, scale: 0.25 }); poly(q, { c: 8, closed: true });
+        const r0 = D(rbStart + 0.3, -2.0 * e), r1 = V.add(r0, [-6, -12]);
+        line(r0, r1, { c: 8 }); line(r1, V.add(r1, [-32, 0]), { c: 8 });
+        text(`우수BOX 폭${fmt1(rb.w)}M 심도${fmt1(rb.d)}M`, V.add(r1, [-31.5, 0.6]), 2.07, { c: 8 });
+      }
+      const vo = -5.0 * e, vd = 2.4 * e;
+      dimline(D(0, vo), D(L, vo), `S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 7);
+      line(D(0, -0.8 * e), D(0, vo - 0.8 * e)); line(D(L, -0.5 * e), D(L, vo - 0.8 * e));
+      segs.forEach((s, i) => {
+        const [a, b] = cum[i]; const col = SEG_COLOR[s.type];
+        dimline(D(a, vd), D(b, vd), `${SEG_LABEL[s.type]} S:${fmt1(s.len)}M`, col);
+        line(D(a, 1.2 * e), D(a, 3.0 * e), { c: col }); line(D(b, 1.2 * e), D(b, 3.0 * e), { c: col });
+      });
+      text(`PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, D(L - 0.4, 0.25 * e), 2.07, { rot: -30, c: 6 });
+      text(`${c.dong} ${c.jibun}번지`, D(L + 3.0 * e, -2.0 * e), 3.6);
+      text(c.name, V.add(D(L + 3.0 * e, -2.0 * e), [3, -5.2]), 3.6);
+    } else {
+      const P0 = J, DP = qM.map(q => V.add(P0, V.mul(q, k)));       // 상세도 경로(도면 좌표)
+      const at = s => atLen(DP, s * k);                                 // s: 미터
+      poly(DP, { c: 6, lw: 50 });
+      const tick = (s, half, col, lw) => { const { p, t } = at(s), n = V.perp(t); line(V.add(p, V.mul(n, half)), V.sub(p, V.mul(n, half)), { c: col, lw }); };
+      cum.slice(0, -1).forEach(([, b]) => tick(b, 3.5, 7, 18));
+      { const { p, t } = at(L), n = V.perp(t); dpl([V.add(p, V.mul(n, 5)), V.sub(p, V.mul(n, 5))], { c: 1, lw: 25 }); }
+      if (rb) {
+        const A = at(rbStart), B = at(Math.min(L, rbStart + rb.w)), n = V.perp(A.t), h = 2.8;
+        const q = [V.add(A.p, V.mul(n, h)), V.add(B.p, V.mul(n, h)), V.sub(B.p, V.mul(n, h)), V.sub(A.p, V.mul(n, h))];
+        hatch([q], 'ANSI31', { c: 8, scale: 0.25 }); poly(q, { c: 8, closed: true });
+        let up = n[1] < 0 ? V.mul(n, -1) : n; const mid = V.mul(V.add(A.p, B.p), .5);
+        const r0 = V.add(mid, V.mul(up, h)), r1 = V.add(V.add(r0, V.mul(up, 10)), [-3, 0]);
+        line(r0, r1, { c: 8 }); line(r1, V.add(r1, [-32, 0]), { c: 8 });
+        text(`우수BOX 폭${fmt1(rb.w)}M 심도${fmt1(rb.d)}M`, V.add(r1, [-31.5, 0.6]), 2.07, { c: 8 });
+      }
+      // 경로를 따라 글자 배치: side +1 = 선 위쪽, -1 = 선 아래쪽, row = 몇 번째 줄
+      const along_ = (s, side, row, txt, col, h = 2.07) => {
+        const { p, t } = at(s); const a = V.ang(t), rd = readable(a); const u = rd === a ? t : V.mul(t, -1);
+        const up = V.perp(u), gap = 0.8;
+        const off = side > 0 ? gap + row * (h + gap) : -(gap + h) - row * (h + gap);
+        text(txt, V.add(p, V.mul(up, off)), h, { rot: rd, c: col, align: 'BC' });
+      };
+      segs.forEach((sg, i) => {
+        const [a, b] = cum[i], col = SEG_COLOR[sg.type];
+        tick(a, 1.6, col); tick(b, 1.6, col);
+        along_((a + b) / 2, +1, 0, `${SEG_LABEL[sg.type]} S:${fmt1(sg.len)}M`, col);
+      });
+      // 가장 긴 구간에 관 표기, 경로 전체 길이·심도는 시작 구간 반대쪽에
+      const legs = DP.slice(1).map((q, i) => V.len(V.sub(q, DP[i])) / k);
+      let li = 0; legs.forEach((l, i) => { if (l > legs[li]) li = i; });
+      const legStart = legs.slice(0, li).reduce((x, y) => x + y, 0);
+      along_(legStart + legs[li] / 2, -1, 0, `PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, 6);
+      along_(legStart + legs[li] / 2, -1, 1, `S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 7);
+      const E_ = at(L), lab = V.add(E_.p, V.mul(E_.t, 3.0 * e));
+      text(`${c.dong} ${c.jibun}번지`, V.add(lab, [-10, 3]), 3.6);
+      text(c.name, V.add(lab, [-7, -2.2]), 3.6);
     }
-    const vo = -5.0 * 11 / k, vd = 2.4 * 11 / k;
-    dimline(D(0, vo), D(L, vo), `S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 7);
-    line(D(0, -0.8 * 11 / k), D(0, vo - 0.8 * 11 / k)); line(D(L, -0.5 * 11 / k), D(L, vo - 0.8 * 11 / k));
-    segs.forEach((s, i) => {
-      const [a, b] = cum[i]; const col = SEG_COLOR[s.type];
-      dimline(D(a, vd), D(b, vd), `${SEG_LABEL[s.type]} S:${fmt1(s.len)}M`, col);
-      line(D(a, 1.2 * 11 / k), D(a, 3.0 * 11 / k), { c: col }); line(D(b, 1.2 * 11 / k), D(b, 3.0 * 11 / k), { c: col });
-    });
-    text(`PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, D(L - 0.4, 0.25 * 11 / k), 2.07, { rot: -30, c: 6 });
-    text(`기존관 LP PE ${MD}A 심도${fmt1(D_MAIN)}M`, D(0.22 * 11 / k, -4.45 * 11 / k), 2.07, { rot: 30, c: 5 });
-    text(`${c.dong} ${c.jibun}번지`, D(L + 3.0 * 11 / k, -2.0 * 11 / k), 3.6);
-    text(c.name, V.add(D(L + 3.0 * 11 / k, -2.0 * 11 / k), [3, -5.2]), 3.6);
-    text('도로', D(-1.6 * 11 / k, -3.5 * 11 / k), 3.0, { rot: 30 });
 
     /* ---------- SECTION */
     const SE = M.section, G = SE.G, XS0 = SE.XS0, XE = SE.XE, VS = 10;
@@ -878,7 +965,7 @@ function addSeg(type='ASP',len=''){
   $('segs').appendChild(d);
 }
 function getSegs(){ return [...$('segs').querySelectorAll('.seg')].map(d=>({type:d.querySelector('select').value,len:parseFloat(d.querySelector('input').value)||0})).filter(s=>s.len>0); }
-function updSum(){ const L=getSegs().reduce((a,s)=>a+s.len,0); $('segSum').textContent='총 '+(Math.round(L*10)/10)+'M'; drawMap(); }
+function updSum(){ const L=getSegs().reduce((a,s)=>a+s.len,0); $('segSum').textContent='총 '+(Math.round(L*10)/10)+'M'; if(S.tee) updRouteInfo(); drawMap(); }
 $('segAdd').onclick=()=>{ addSeg('BRK',''); };
 $('vDate').value=new Date(Date.now()+9*3600e3).toISOString().slice(0,10);
 
@@ -887,7 +974,7 @@ $('btnGis').onclick=()=>$('fGis').click();
 $('fGis').onchange=async e=>{
   const f=e.target.files[0]; if(!f) return;
   try{
-    S.gis=E.readGisDxf(await f.arrayBuffer()); S.tee=null; $('teeInfo').style.display='none';
+    S.gis=E.readGisDxf(await f.arrayBuffer()); S.tee=null; S.route=null; updRouteInfo();
     S.pipeLayer=E.guessPipeLayer(S.gis);
     const sel=$('pipeLayer'); sel.innerHTML='';
     S.gis.layers.forEach((l,i)=>{ const o=document.createElement('option'); o.value=l.name;
@@ -898,7 +985,7 @@ $('fGis').onchange=async e=>{
   }catch(err){ alert('DXF를 읽지 못했습니다: '+err.message); }
   e.target.value='';
 };
-$('pipeLayer').onchange=()=>{ S.pipeLayer=$('pipeLayer').value; S.tee=null; $('teeInfo').style.display='none'; drawMap(); };
+$('pipeLayer').onchange=()=>{ S.pipeLayer=$('pipeLayer').value; S.tee=null; S.route=null; updRouteInfo(); drawMap(); };
 const cv=$('map'), ctx=cv.getContext('2d');
 let view={s:1,ox:0,oy:0};
 function resize(){ const r=cv.getBoundingClientRect(); const dpr=window.devicePixelRatio||1; cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
@@ -924,23 +1011,66 @@ function drawMap(){
   S.gis.texts.forEach(t=>{ if(/^\d+(-\d+)?$/.test(t.s)||/PE|LP/.test(t.s)){ const [u,v]=w2s([t.x,t.y]); ctx.fillText(t.s,u,v); } });
   if(S.tee){
     const L=getSegs().reduce((a,s)=>a+s.len,0)||6;
-    const a=w2s(S.tee.foot), b=w2s([S.tee.foot[0]+S.tee.dir[0]*L,S.tee.foot[1]+S.tee.dir[1]*L]);
-    ctx.strokeStyle='#e000e0'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
+    const a=w2s(S.tee.foot);
+    const pts=(S.route&&S.route.length>1)?S.route:[S.tee.foot,[S.tee.foot[0]+S.tee.dir[0]*L,S.tee.foot[1]+S.tee.dir[1]*L]];
+    ctx.strokeStyle='#e000e0'; ctx.lineWidth=3; ctx.setLineDash(S.route&&S.route.length>1?[]:[7,4]);
+    ctx.beginPath(); pts.forEach((q,i)=>{ const [u,v]=w2s(q); i?ctx.lineTo(u,v):ctx.moveTo(u,v); }); ctx.stroke(); ctx.setLineDash([]);
+    if(S.route&&S.route.length>1){ ctx.fillStyle='#e000e0'; S.route.slice(1).forEach(q=>{ const [u,v]=w2s(q); ctx.fillRect(u-3,v-3,6,6); }); }
+    if(S.hover){ const last=S.route&&S.route.length?S.route[S.route.length-1]:S.tee.foot; const h=nextPoint(S.hover); const [u0,v0]=w2s(last),[u1,v1]=w2s(h);
+      ctx.strokeStyle='rgba(224,0,224,.55)'; ctx.lineWidth=2; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(u0,v0); ctx.lineTo(u1,v1); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle='#a000a0'; ctx.font='11px sans-serif'; ctx.textAlign='left'; ctx.fillText(Math.hypot(h[0]-last[0],h[1]-last[1]).toFixed(1)+'m',u1+8,v1-6); }
     ctx.fillStyle='#fff'; ctx.strokeStyle='#000'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(a[0],a[1],5,0,7); ctx.fill(); ctx.stroke();
     ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(a[0],a[1],2,0,7); ctx.fill();
   }
 }
 let drag=null;
 cv.addEventListener('mousedown',e=>{ drag={x:e.offsetX,y:e.offsetY,ox:view.ox,oy:view.oy,moved:false}; });
-cv.addEventListener('mousemove',e=>{ if(!drag) return; const dx=e.offsetX-drag.x, dy=e.offsetY-drag.y; if(Math.abs(dx)+Math.abs(dy)>4) drag.moved=true; if(drag.moved){ view.ox=drag.ox+dx; view.oy=drag.oy+dy; drawMap(); } });
+cv.addEventListener('mousemove',e=>{
+  if(!drag){ if(S.tee){ S.hover=s2w([e.offsetX,e.offsetY]); drawMap(); } return; }
+  const dx=e.offsetX-drag.x, dy=e.offsetY-drag.y; if(Math.abs(dx)+Math.abs(dy)>4) drag.moved=true; if(drag.moved){ view.ox=drag.ox+dx; view.oy=drag.oy+dy; drawMap(); } });
+// 직각 맞춤: 첫 구간은 배관과 직각(분기 방향), 이후 구간은 앞 구간과 직각 또는 평행
+function nextPoint(w){
+  const route=S.route&&S.route.length?S.route:[S.tee.foot], last=route[route.length-1];
+  if(!$('ortho').checked) return w;
+  const v=[w[0]-last[0],w[1]-last[1]];
+  let ax;
+  if(route.length===1) ax=S.tee.dir;
+  else { const p=route[route.length-2], d=[last[0]-p[0],last[1]-p[1]], l=Math.hypot(d[0],d[1])||1; const u=[d[0]/l,d[1]/l], n=[-u[1],u[0]];
+    ax=Math.abs(v[0]*u[0]+v[1]*u[1])>=Math.abs(v[0]*n[0]+v[1]*n[1])?u:n; }
+  let t=v[0]*ax[0]+v[1]*ax[1]; if(route.length===1) t=Math.max(0.3,t);
+  return [last[0]+ax[0]*t,last[1]+ax[1]*t];
+}
+function updRouteInfo(){
+  const has=S.tee, n=S.route&&S.route.length>1?S.route.length-1:0;
+  $('rUndo').disabled=!n; $('rReset').disabled=!has;
+  const b=$('teeInfo');
+  if(!has){ b.style.display='none'; $('routeHint').textContent='① 건물 쪽을 클릭해 분기점을 정하세요.'; return; }
+  b.style.display='';
+  if(!n){ b.textContent='분기점 지정됨 · 직선 인입'; $('routeHint').textContent='② 꺾어야 하면 꺾이는 점을 차례로 클릭하세요. 직선이면 그대로 진행하면 됩니다.'; }
+  else { let len=0; for(let i=1;i<S.route.length;i++) len+=Math.hypot(S.route[i][0]-S.route[i-1][0],S.route[i][1]-S.route[i-1][1]);
+    const L=getSegs().reduce((a,s)=>a+s.len,0);
+    b.textContent=`꺾인 경로 ${n}구간 · 지도상 ${len.toFixed(1)}m` + (L?` (발주서 ${Math.round(L*10)/10}m)`:'');
+    $('routeHint').textContent='계속 클릭하면 점이 추가됩니다. 마지막 클릭이 인입 끝점입니다.'; }
+}
 cv.addEventListener('mouseup',e=>{
   if(drag && !drag.moved && S.gis && S.pipeLayer){
-    const w=s2w([e.offsetX,e.offsetY]); const t=E.snapTee(S.gis,S.pipeLayer,w);
-    if(t){ S.tee=t; $('teeInfo').style.display=''; $('teeInfo').textContent='분기점 지정됨 · 배관까지 '+t.dist.toFixed(1)+'m 지점 클릭'; $('st2').classList.add('done'); drawMap(); }
+    const w=s2w([e.offsetX,e.offsetY]);
+    if(!S.tee){
+      const t=E.snapTee(S.gis,S.pipeLayer,w);
+      if(t){ S.tee=t; S.route=null; $('st2').classList.add('done'); }
+    } else {
+      if(!S.route||!S.route.length) S.route=[S.tee.foot];
+      const q=nextPoint(w), last=S.route[S.route.length-1];
+      if(Math.hypot(q[0]-last[0],q[1]-last[1])>0.2) S.route.push(q);
+    }
+    updRouteInfo(); drawMap();
   }
   drag=null;
 });
-cv.addEventListener('mouseleave',()=>{ drag=null; });
+cv.addEventListener('mouseleave',()=>{ drag=null; S.hover=null; drawMap(); });
+$('rUndo').onclick=()=>{ if(S.route&&S.route.length>1){ S.route.pop(); if(S.route.length<2) S.route=null; } updRouteInfo(); drawMap(); };
+$('rReset').onclick=()=>{ S.tee=null; S.route=null; S.hover=null; $('st2').classList.remove('done'); updRouteInfo(); drawMap(); };
+$('ortho').onchange=()=>drawMap();
 function zoomAt(f,u,v){ const w=s2w([u,v]); view.s*=f; view.ox=u-w[0]*view.s; view.oy=v+w[1]*view.s; drawMap(); }
 cv.addEventListener('wheel',e=>{ e.preventDefault(); zoomAt(e.deltaY<0?1.2:1/1.2,e.offsetX,e.offsetY); },{passive:false});
 $('zIn').onclick=()=>{ const r=cv.getBoundingClientRect(); zoomAt(1.3,r.width/2,r.height/2); };
@@ -964,7 +1094,7 @@ $('btnMake').onclick=async()=>{
     const c={ dong:$('vDong').value.trim(), jibun:$('vJibun').value.trim(), name:$('vName').value.trim(), date,
       mainDia:+$('vMain').value, newDia:+$('vNew').value||63, segs, depthMain:parseFloat($('vDepth').value)||1.2,
       rainBox:$('vRain').checked?{w:parseFloat($('vRainW').value)||0.6,d:parseFloat($('vRainD').value)||0.6}:null,
-      gis:S.gis, pipeLayer:S.pipeLayer, tee:S.tee,
+      gis:S.gis, pipeLayer:S.pipeLayer, tee:Object.assign({},S.tee,{route:(S.route&&S.route.length>1)?S.route:null}),
       designer:$('vDesigner').value, manager:$('vManager').value, approver:$('vApprover').value };
     try{ localStorage.setItem('excavSigners',JSON.stringify({d:c.designer,m:c.manager,a:c.approver})); }catch(e){}
     const r=E.buildDrawing(S.pkg,c);

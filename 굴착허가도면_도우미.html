@@ -528,9 +528,9 @@
           const closed = p.closed || V.len(V.sub(p.pts[0], p.pts[p.pts.length - 1])) < 0.05;
           if (!closed || !inPoly([jt.x, jt.y], p.pts)) return;
           const A = area(p.pts); if (A.a < 8 || A.a > 3000) return;
-          if (!hit || A.a < hit.a) hit = { a: A.a, c: A.c };
+          if (!hit || A.a < hit.a) hit = { a: A.a, c: A.c, pts: p.pts };
         });
-        if (hit) return { c: hit.c };
+        if (hit) return { c: hit.c, pts: hit.pts };
       }
       // ② 인입 끝점이 들어있거나 가장 가까운 건물
       let best = null;
@@ -543,7 +543,7 @@
         const d = inside ? 0 : nearestOnPoly(p.pts.concat([p.pts[0]]), routeEndW).dist;
         if (d > 6) return;
         const sc = d * 1000 + (inside ? A.a : 0);
-        if (!best || sc < best.sc) best = { sc, c: A.c };
+        if (!best || sc < best.sc) best = { sc, c: A.c, pts: p.pts };
       });
       return best;
     })();
@@ -589,128 +589,131 @@
       text(`${c.jibun}번지 인입 공급관`, V.add(l1, [0.5, -2.6]), 1.82, { c: 21, style: '지명', layer: '바탕선' });
     }
 
-    /* ---------- DETAIL "A" (S=NONE) */
+    /* ---------- DETAIL "A" (S=NONE) : 분기점 주변 수치지도를 양식의 사투상(기존관 30°, 인입 150°)으로 옮겨 그림 */
     const DT = M.detail, RD = [DT[0] + .5, DT[1] + .5, DT[2] - .5, DT[3] - .5];
-    let O = [219334.0, 256446.0];
     const uA = [Math.cos(30 * deg), Math.sin(30 * deg)], uS = [Math.cos(150 * deg), Math.sin(150 * deg)];
-    // 꺾인 경로: 첫 구간이 uS 방향이 되도록 회전, 전체 길이를 발주서 연장 L로 맞춤
-    let qM = null;                                        // 상세도 좌표계(미터) 경로, 분기점 기준
-    if (routeW) {
-      // 상세도는 사투상(기존관 30°, 인입 150°): 현장의 '배관 직각' → uS, '배관 평행' → uA 로 옮김
-      let pd = c.tee.pipeDir ? V.norm(c.tee.pipeDir) : V.perp(dir);
-      pd = V.sub(pd, V.mul(dir, V.dot(pd, dir))); pd = V.norm(pd);
-      const sg = (dir[0] * pd[1] - dir[1] * pd[0]) < 0 ? 1 : -1;
-      // 상세도는 S=NONE: 좁은 골목에서도 경로가 기존관과 겹치지 않도록 과장해서 그림
-      //  - 배관에서 나가는 구간(직각)은 전체 길이의 22% 이상으로
-      //  - 첫 구간이 배관과 평행하면 앞에 짧은 직각 출발 구간을 넣음
-      //  - 배관 쪽으로 되돌아오는 구간이 기존관을 넘지 않도록 제한
-      const Lw = routeLen(routeW), PERP_MIN = 0.22 * Lw, DEPART = 0.18 * Lw;
-      const legs = routeW.slice(1).map((q, i) => { const v = V.sub(q, routeW[i]); return [V.dot(v, dir), V.dot(v, pd) * sg]; });
-      const ab = [];
-      if (legs.length && Math.abs(legs[0][0]) < Math.abs(legs[0][1])) ab.push([DEPART, 0]);
-      let aCur = ab.length ? DEPART : 0;
-      legs.forEach(([da, db]) => {
-        if (Math.abs(da) >= Math.abs(db)) {
-          da = Math.sign(da || 1) * Math.max(Math.abs(da), PERP_MIN);
-          if (da < 0) da = Math.max(da, DEPART * 0.8 - aCur);
-        }
-        aCur += da; ab.push([da, db]);
-      });
-      const raw = [[0, 0]]; ab.forEach(([da, db]) => raw.push(V.add(raw[raw.length - 1], V.add(V.mul(uS, da), V.mul(uA, db)))));
-      const f = L / routeLen(raw);
-      qM = raw.map(q => V.mul(q, f));
-    }
-    let k = Math.min(11, 70 / L);
-    if (qM) {   // 경로 전체가 상세도 가운데 오도록 축척과 분기점 위치(O)를 정함
-      let a = 0, b = 0, cc = 0, d = 0; qM.forEach(([x, y]) => { a = Math.min(a, x); b = Math.min(b, y); cc = Math.max(cc, x); d = Math.max(d, y); });
-      const W_ = DT[2] - DT[0] - 70, H_ = DT[3] - DT[1] - 50;
-      k = Math.min(18, W_ / Math.max(cc - a, 0.5), H_ / Math.max(d - b, 0.5));
-      O = V.sub([(DT[0] + DT[2]) / 2 + 8, (DT[1] + DT[3]) / 2 - 2], V.mul([(a + cc) / 2, (b + d) / 2], k));
-    }
-    const D = (u, v) => V.add(O, V.add(V.mul(uS, u * k), V.mul(uA, v * k)));
-    const vr = 140 / k, e = 11 / k;
-    const dpl = (pts, o) => clipPoly(pts, RD).forEach(s => poly(s, o));
-    dpl([D(0, -vr), D(0, vr)], { c: 5, lw: 35 });
-    dpl([D(-35 / k, -vr), D(-35 / k, vr)], { c: 1, lw: 25 });
+    const crs = (p_, q_) => p_[0] * q_[1] - p_[1] * q_[0];
+    const aOf = v => crs(v, uA) / crs(uS, uA);                       // 사투상 좌표의 '건물 쪽' 성분
+    let pd = V.norm(pdW); pd = V.norm(V.sub(pd, V.mul(dir, V.dot(pd, dir))));
+    const sg = (dir[0] * pd[1] - dir[1] * pd[0]) < 0 ? 1 : -1;
+    const AB = w => { const v = V.sub(w, tee); return [V.dot(v, dir), V.dot(v, pd) * sg]; };   // 현장 좌표 → (직각, 평행) 성분[m]
+    // 인입 경로: 상세도에서는 항상 직각으로 정리 (각 구간을 배관과 직각/평행 중 큰 성분으로)
+    const routeWorld = routeW || [tee, V.add(tee, V.mul(dir, L))];
+    const abPts = [[0, 0]];
+    routeWorld.slice(1).forEach((q, i) => {
+      const [a1, b1] = AB(q), [a0, b0] = AB(routeWorld[i]); let da = a1 - a0, db = b1 - b0;
+      if (Math.abs(da) >= Math.abs(db)) db = 0; else da = 0;
+      const last = abPts[abPts.length - 1]; if (Math.abs(da) + Math.abs(db) > 1e-3) abPts.push([last[0] + da, last[1] + db]);
+    });
+    if (abPts.length < 2) abPts.push([L, 0]);
+    const endAB = abPts[abPts.length - 1], endW = routeWorld[routeWorld.length - 1];
+    // 대상 건물(수요처)과 옆집 건물
+    const isClosed = p => p.pts.length >= 4 && (p.closed || V.len(V.sub(p.pts[0], p.pts[p.pts.length - 1])) < 0.05);
+    const target = lotPoly && lotPoly.pts ? lotPoly.pts : null;
+    const inPolyD = (q, pts) => { let c_ = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if (((yi > q[1]) !== (yj > q[1])) && (q[0] < (xj - xi) * (q[1] - yi) / (yj - yi) + xi)) c_ = !c_; } return c_; };
+    let nb = null;
+    c.gis.polys.forEach(p => {
+      if (p.frame || p.layer === c.pipeLayer || !isClosed(p) || p.pts === target) return;
+      const r = nearestOnPoly(p.pts.concat([p.pts[0]]), endW); if (r.dist > 10) return;
+      const lab = c.gis.texts.find(t => /^\d+(-\d+)?$/.test(t.s) && t.s !== c.jibun && inPolyD([t.x, t.y], p.pts));
+      const sc = r.dist - (lab ? 3 : 0);
+      if (!nb || sc < nb.sc) nb = { sc, pts: p.pts, foot: r.foot, segDir: r.dir, dist: r.dist, label: lab ? lab.s : '' };
+    });
+    // 축척·위치: 경로와 (대상·옆집 건물 일부)가 상세도 안에 들어오게
+    const bbPts = abPts.slice();
+    if (target) target.forEach(q => { const t_ = AB(q); if (Math.hypot(t_[0] - endAB[0], t_[1] - endAB[1]) < 4) bbPts.push(t_); });
+    if (nb) bbPts.push(AB(nb.foot));
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+    bbPts.forEach(([a_, b_]) => { const q = V.add(V.mul(uS, a_), V.mul(uA, b_)); mnx = Math.min(mnx, q[0]); mny = Math.min(mny, q[1]); mxx = Math.max(mxx, q[0]); mxy = Math.max(mxy, q[1]); });
+    const k = Math.min(14, (DT[2] - DT[0] - 60) / Math.max(mxx - mnx, 1), (DT[3] - DT[1] - 55) / Math.max(mxy - mny, 1));
+    const O = V.sub([(DT[0] + DT[2]) / 2 + 6, (DT[1] + DT[3]) / 2 - 4], V.mul([(mnx + mxx) / 2, (mny + mxy) / 2], k));
+    const TA = (a_, b_) => V.add(O, V.add(V.mul(uS, a_ * k), V.mul(uA, b_ * k)));
+    const TW = w => { const [a_, b_] = AB(w); return TA(a_, b_); };
+    const e = 11 / k;
+    const inD = q => q[0] > RD[0] + 2 && q[0] < RD[2] - 2 && q[1] > RD[1] + 2 && q[1] < RD[3] - 2;
+    const dtext = (str, q, h, o) => { if (inD(q)) text(str, q, h, o); };
+    const dpl = (pts, o) => clipPoly(pts, RD).forEach(s_ => poly(s_, o));
+    // 주변 수치지도: 건물·도로(회색), 기존관(파랑, 실제 꺾임 그대로)
+    c.gis.polys.forEach(p => {
+      if (p.frame) return;
+      const pts = (isClosed(p) && !p.closed ? p.pts : (p.closed ? p.pts.concat([p.pts[0]]) : p.pts)).map(TW);
+      if (p.layer === c.pipeLayer) dpl(pts, { c: 5, lw: 35 });
+      else if (p.pts !== target && (!nb || p.pts !== nb.pts)) dpl(pts, { c: 8, lw: 13 });
+    });
+    // 수요처 건물(빨강) · 옆집 건물(검정)
+    if (target) dpl((target[0] === target[target.length - 1] ? target : target.concat([target[0]])).map(TW), { c: 1, lw: 30 });
+    if (nb) dpl((nb.pts.concat([nb.pts[0]])).map(TW), { c: 7, lw: 18 });
     translatePrims(S.tee, O);
     const tt = S.tee_text;
-    text(`SPLIT TEE ${MD}*${ND}A`, V.add(O, tt.tee.p), tt.tee.h, { rot: tt.tee.rot, style: tt.tee.style });
-    text('보호철판 0.5M', V.add(O, tt.plate.p), tt.plate.h, { rot: tt.plate.rot, style: tt.plate.style, c: 21 });
-    const J = V.add(O, S.J_rel), along = V.dot(S.J_rel, uA) / k;
-    text(`기존관 LP PE ${MD}A 심도${fmt1(D_MAIN)}M`, D(0.22 * e, -4.45 * e), 2.07, { rot: 30, c: 5 });
-    text('도로', D(-1.6 * e, -3.5 * e), 3.0, { rot: 30 });
-    if (!qM) {
-      cum.slice(0, -1).forEach(([, b]) => dpl([D(b, -vr), D(b, vr)], { c: 7, lw: 18 }));
-      dpl([D(L, -vr), D(L, 3.0), D(L + 90 / k, 3.0)], { c: 1, lw: 25 });
-      poly([J, D(L, along)], { c: 6, lw: 50 });
-      if (rb) {
-        const q = [D(rbStart, -2.6 * e), D(rbStart + rb.w, -2.6 * e), D(rbStart + rb.w, 2.6 * e), D(rbStart, 2.6 * e)];
-        hatch([q], 'ANSI31', { c: 8, scale: 0.25 }); poly(q, { c: 8, closed: true });
-        const r0 = D(rbStart + 0.3, -2.0 * e), r1 = V.add(r0, [-6, -12]);
-        line(r0, r1, { c: 8 }); line(r1, V.add(r1, [-32, 0]), { c: 8 });
-        text(`우수BOX 폭${fmt1(rb.w)}M 심도${fmt1(rb.d)}M`, V.add(r1, [-31.5, 0.6]), 2.07, { c: 8 });
-      }
-      const vo = -5.0 * e, vd = 2.4 * e;
-      dimline(D(0, vo), D(L, vo), `S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 7);
-      line(D(0, -0.8 * e), D(0, vo - 0.8 * e)); line(D(L, -0.5 * e), D(L, vo - 0.8 * e));
-      segs.forEach((s, i) => {
-        const [a, b] = cum[i]; const col = SEG_COLOR[s.type];
-        dimline(D(a, vd), D(b, vd), `${SEG_LABEL[s.type]} S:${fmt1(s.len)}M`, col);
-        line(D(a, 1.2 * e), D(a, 3.0 * e), { c: col }); line(D(b, 1.2 * e), D(b, 3.0 * e), { c: col });
-      });
-      text(`PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, D(L - 0.4, 0.25 * e), 2.07, { rot: -30, c: 6 });
-      text(`${c.dong} ${c.jibun}번지`, D(L + 3.0 * e, -2.0 * e), 3.6);
-      text(c.name, V.add(D(L + 3.0 * e, -2.0 * e), [3, -5.2]), 3.6);
-    } else {
-      const P0 = J, DP = qM.map(q => V.add(P0, V.mul(q, k)));       // 상세도 경로(도면 좌표)
-      const at = s => atLen(DP, s * k);                                 // s: 미터
-      poly(DP, { c: 6, lw: 50 });
-      const tick = (s, half, col, lw) => { const { p, t } = at(s), n = V.perp(t); line(V.add(p, V.mul(n, half)), V.sub(p, V.mul(n, half)), { c: col, lw }); };
-      cum.slice(0, -1).forEach(([, b]) => tick(b, 3.5, 7, 18));
-      let lotX = DP[DP.length - 1];
-      { // 부지 경계(빨간선): 기존관과 평행, 경로에서 건물 쪽으로 가장 먼 지점을 지남
-        // 사투상 좌표: q = a·uS + b·uA → a(배관에서 건물 쪽으로 떨어진 정도) = cross(q, uA)/cross(uS, uA)
-        const crs = (p_, q_) => p_[0] * q_[1] - p_[1] * q_[0], aOf = q => crs(V.sub(q, O), uA) / crs(uS, uA);
-        let um = -Infinity, X = DP[DP.length - 1];
-        DP.forEach(q => { const u = aOf(q); if (u > um - 1e-6) { um = u; X = q; } });
-        const tEnd = at(L).t;
-        if (Math.abs(V.dot(tEnd, uA)) > 0.9) X = V.add(X, V.mul(uS, 6));    // 마지막 구간이 배관과 평행(ㄱ자)이면 조금 바깥에
-        dpl([V.sub(X, V.mul(uA, 400)), V.add(X, V.mul(uA, 400))], { c: 1, lw: 25 });
-        lotX = X; }
-      if (rb) {
-        const A = at(rbStart), B = at(Math.min(L, rbStart + rb.w)), n = V.perp(A.t), h = 2.8;
-        const q = [V.add(A.p, V.mul(n, h)), V.add(B.p, V.mul(n, h)), V.sub(B.p, V.mul(n, h)), V.sub(A.p, V.mul(n, h))];
-        hatch([q], 'ANSI31', { c: 8, scale: 0.25 }); poly(q, { c: 8, closed: true });
-        let up = n[1] < 0 ? V.mul(n, -1) : n; const mid = V.mul(V.add(A.p, B.p), .5);
-        const r0 = V.add(mid, V.mul(up, h)), r1 = V.add(V.add(r0, V.mul(up, 10)), [-3, 0]);
-        line(r0, r1, { c: 8 }); line(r1, V.add(r1, [-32, 0]), { c: 8 });
-        text(`우수BOX 폭${fmt1(rb.w)}M 심도${fmt1(rb.d)}M`, V.add(r1, [-31.5, 0.6]), 2.07, { c: 8 });
-      }
-      // 경로를 따라 글자 배치: side +1 = 선 위쪽, -1 = 선 아래쪽, row = 몇 번째 줄
-      const along_ = (s, side, row, txt, col, h = 2.07) => {
-        const { p, t } = at(s); const a = V.ang(t), rd = readable(a); const u = rd === a ? t : V.mul(t, -1);
-        const up = V.perp(u), gap = 0.8;
-        const off = side > 0 ? gap + row * (h + gap) : -(gap + h) - row * (h + gap);
-        text(txt, V.add(p, V.mul(up, off)), h, { rot: rd, c: col, align: 'BC' });
-      };
-      segs.forEach((sg, i) => {
-        const [a, b] = cum[i], col = SEG_COLOR[sg.type];
-        tick(a, 1.6, col); tick(b, 1.6, col);
-        along_((a + b) / 2, +1, 0, `${SEG_LABEL[sg.type]} S:${fmt1(sg.len)}M`, col);
-      });
-      // 가장 긴 구간에 관 표기, 경로 전체 길이·심도는 시작 구간 반대쪽에
-      const legs = DP.slice(1).map((q, i) => V.len(V.sub(q, DP[i])) / k);
-      let li = 0; legs.forEach((l, i) => { if (l > legs[li]) li = i; });
-      const legStart = legs.slice(0, li).reduce((x, y) => x + y, 0);
-      along_(legStart + legs[li] / 2, -1, 0, `PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, 6);
-      along_(legStart + legs[li] / 2, -1, 1, `S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 7);
-      // 주소·건물명은 빨간 부지선 바깥(건물 쪽)에
-      const crs2 = (p_, q_) => p_[0] * q_[1] - p_[1] * q_[0];
-      const E_ = at(L).p, beyond = crs2(V.sub(lotX, E_), uA) / crs2(uS, uA) + 9;
-      const lab = V.add(V.add(E_, V.mul(uS, beyond)), V.mul(uA, -6));
-      text(`${c.dong} ${c.jibun}번지`, V.add(lab, [-10, 3]), 3.6);
-      text(c.name, V.add(lab, [-7, -2.2]), 3.6);
+    dtext(`SPLIT TEE ${MD}*${ND}A`, V.add(O, tt.tee.p), tt.tee.h, { rot: tt.tee.rot, style: tt.tee.style });
+    dtext('보호철판 0.5M', V.add(O, tt.plate.p), tt.plate.h, { rot: tt.plate.rot, style: tt.plate.style, c: 21 });
+    // 인입관 (분기 T 끝에서 출발)
+    const J = V.add(O, S.J_rel), Jd = V.sub(J, O);
+    const DP = abPts.map(([a_, b_]) => V.add(TA(a_, b_), Jd));
+    poly(DP, { c: 6, lw: 50 });
+    const drawLen = DP.slice(1).reduce((a_, q, i) => a_ + V.len(V.sub(q, DP[i])), 0);
+    const at = s_ => atLen(DP, s_ / L * drawLen);                      // 발주서 연장 s[m] → 도면 경로 위치
+    const tick = (s_, half, col, lw) => { const { p, t } = at(s_), n = V.perp(t); line(V.add(p, V.mul(n, half)), V.sub(p, V.mul(n, half)), { c: col, lw }); };
+    cum.slice(0, -1).forEach(([, b]) => tick(b, 3.5, 7, 18));
+    if (rb) {
+      const A = at(rbStart), B = at(Math.min(L, rbStart + rb.w)), n = V.perp(A.t), h = 2.8;
+      const Bp = V.len(V.sub(B.p, A.p)) < 2 ? V.add(A.p, V.mul(A.t, 2)) : B.p;
+      const q = [V.add(A.p, V.mul(n, h)), V.add(Bp, V.mul(n, h)), V.sub(Bp, V.mul(n, h)), V.sub(A.p, V.mul(n, h))];
+      hatch([q], 'ANSI31', { c: 8, scale: 0.25 }); poly(q, { c: 8, closed: true });
+      let up = n[1] < 0 ? V.mul(n, -1) : n; const mid = V.mul(V.add(A.p, Bp), .5);
+      const r0 = V.add(mid, V.mul(up, h)), r1 = V.add(V.add(r0, V.mul(up, 10)), [-3, 0]);
+      line(r0, r1, { c: 8 }); line(r1, V.add(r1, [-32, 0]), { c: 8 });
+      dtext(`우수BOX 폭${fmt1(rb.w)}M 심도${fmt1(rb.d)}M`, V.add(r1, [-31.5, 0.6]), 2.07, { c: 8 });
     }
+    const along_ = (s_, side, row, txt, col, h = 2.07) => {
+      const { p, t } = at(s_); const a_ = V.ang(t), rd = readable(a_); const u = rd === a_ ? t : V.mul(t, -1);
+      const up = V.perp(u), gap = 0.8;
+      // 배관과 평행한 구간에서는 글자를 기존관 반대쪽(건물 쪽)에 쌓음
+      if (Math.abs(aOf(t)) < 0.3 && aOf(up) < 0) side = -side;
+      const off = side > 0 ? gap + row * (h + gap) : -(gap + h) - row * (h + gap);
+      dtext(txt, V.add(p, V.mul(up, off)), h, { rot: rd, c: col, align: 'BC' });
+    };
+    segs.forEach((sg_, i) => {
+      const [a_, b_] = cum[i], col = SEG_COLOR[sg_.type];
+      tick(a_, 1.6, col); tick(b_, 1.6, col);
+      along_((a_ + b_) / 2, +1, 0, `${SEG_LABEL[sg_.type]} S:${fmt1(sg_.len)}M`, col);
+    });
+    {
+      const legs = DP.slice(1).map((q, i) => V.len(V.sub(q, DP[i])));
+      let li = 0; legs.forEach((l, i) => { if (l > legs[li]) li = i; });
+      const sMid = (legs.slice(0, li).reduce((x, y) => x + y, 0) + legs[li] / 2) / drawLen * L;
+      along_(sMid, +1, 1, `PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, 6);
+      along_(sMid, +1, 2, `S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 7);
+    }
+    // 옆집 경계와 인입 지점 사이 이격거리 (수치지도 값)
+    if (nb) {
+      const P1 = DP[DP.length - 1], P2 = V.add(TW(nb.foot), Jd);
+      const segA = TW(V.sub(nb.foot, V.mul(nb.segDir, 3))), segB = TW(V.add(nb.foot, V.mul(nb.segDir, 3)));
+      dpl([V.add(segA, Jd), V.add(segB, Jd)], { c: 1, lw: 30, lt: 'HIDDEN', lts: 0.4 });        // 옆집 경계(빨간 점선)
+      if (V.len(V.sub(P2, P1)) > 1.5) {
+        const u = V.norm(V.sub(P2, P1)), nn = V.perp(u);
+        line(P1, P2, { c: 30 }); arrow(P1, V.mul(u, -1), 1.4, 30); arrow(P2, u, 1.4, 30);
+        let a_ = V.ang(u); const rd = readable(a_);
+        dtext(`${fmt1(nb.dist)}M`, V.add(V.mul(V.add(P1, P2), .5), V.mul(nn, 0.8)), 2.07, { rot: rd, c: 30, align: 'BC' });
+      }
+      if (nb.label) {   // 옆집 지번: 경계선에서 옆집 안쪽으로 2.5m
+        const cN = nb.pts.reduce((a_, q) => V.add(a_, q), [0, 0]).map(v => v / nb.pts.length);
+        const into = V.norm(V.sub(cN, nb.foot)), q = V.add(TW(V.add(nb.foot, V.mul(into, 2.5))), Jd);
+        dtext(`${nb.label}번지`, q, 2.6, { c: 7, align: 'MC' });
+      }
+    }
+    // 수요처 주소·건물명: 대상 건물 안(없으면 끝점 너머)
+    {
+      // 인입 끝점에서 건물 안쪽으로 3m 지점 (대상 건물이 있으면 그 중심 방향으로)
+      const cW = lotPoly ? lotPoly.c : V.add(endW, V.mul(dir, 3));
+      const toC = V.len(V.sub(cW, endW)) > 0.1 ? V.norm(V.sub(cW, endW)) : dir;
+      let lab = V.add(TW(V.add(endW, V.mul(toC, Math.min(3.5, V.len(V.sub(cW, endW)) || 3)))), Jd);
+      if (!inD(lab)) lab = V.add(DP[DP.length - 1], V.mul(uS, 10));
+      dtext(`${c.dong} ${c.jibun}번지`, V.add(lab, [0, 1.8]), 3.0, { align: 'MC' });
+      dtext(c.name, V.add(lab, [0, -2.4]), 3.0, { align: 'MC' });
+    }
+    dtext(`기존관 LP PE ${MD}A 심도${fmt1(D_MAIN)}M`, V.add(TA(-0.25 * e, -6.5 * e), [0, 0]), 2.07, { rot: 30, c: 5 });
+    dtext('도로', TA(-2.5 * e, -3.0 * e), 3.0, { rot: 30 });
 
     /* ---------- SECTION */
     const SE = M.section, G = SE.G, XS0 = SE.XS0, XE = SE.XE, VS = 10;

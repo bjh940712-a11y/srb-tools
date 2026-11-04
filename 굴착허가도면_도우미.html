@@ -691,10 +691,18 @@
       const segA = TW(V.sub(nb.foot, V.mul(nb.segDir, 3))), segB = TW(V.add(nb.foot, V.mul(nb.segDir, 3)));
       dpl([V.add(segA, Jd), V.add(segB, Jd)], { c: 1, lw: 30, lt: 'HIDDEN', lts: 0.4 });        // 옆집 경계(빨간 점선)
       if (V.len(V.sub(P2, P1)) > 1.5) {
-        const u = V.norm(V.sub(P2, P1)), nn = V.perp(u);
-        line(P1, P2, { c: 30 }); arrow(P1, V.mul(u, -1), 1.4, 30); arrow(P2, u, 1.4, 30);
-        let a_ = V.ang(u); const rd = readable(a_);
-        dtext(`${fmt1(nb.dist)}M`, V.add(V.mul(V.add(P1, P2), .5), V.mul(nn, 0.8)), 2.07, { rot: rd, c: 30, align: 'BC' });
+        // 치수선을 신설관에서 떨어진 쪽으로 평행 이동 (보조선으로 측정점과 연결)
+        const u = V.norm(V.sub(P2, P1)), nn0 = V.perp(u);
+        const segDist = (q) => { let m = Infinity; for (let i = 0; i + 1 < DP.length; i++) m = Math.min(m, nearestOnPoly([DP[i], DP[i + 1]], q).dist); return m; };
+        const score = sd => { const o = V.mul(nn0, sd * 5); return Math.min(segDist(V.add(P1, o)), segDist(V.add(P2, o)), segDist(V.add(V.mul(V.add(P1, P2), .5), o))); };
+        const sd = score(1) >= score(-1) ? 1 : -1, nn = V.mul(nn0, sd), off = 5;
+        const Q1 = V.add(P1, V.mul(nn, off)), Q2 = V.add(P2, V.mul(nn, off));
+        line(V.add(P1, V.mul(nn, 0.8)), V.add(Q1, V.mul(nn, 1.0)), { c: 30 });
+        line(V.add(P2, V.mul(nn, 0.8)), V.add(Q2, V.mul(nn, 1.0)), { c: 30 });
+        line(Q1, Q2, { c: 30 }); arrow(Q1, V.mul(u, -1), 1.4, 30); arrow(Q2, u, 1.4, 30);
+        const rd = readable(V.ang(u)), up = V.perp(rd === V.ang(u) ? u : V.mul(u, -1));
+        const tOff = V.dot(up, nn) >= 0 ? 0.8 : -(0.8 + 2.07);                 // 글자는 신설관 반대쪽
+        dtext(`${fmt1(nb.dist)}M`, V.add(V.mul(V.add(Q1, Q2), .5), V.mul(up, tOff)), 2.07, { rot: rd, c: 30, align: 'BC' });
       }
       if (nb.label) {   // 옆집 지번: 경계선에서 옆집 안쪽으로 2.5m
         const cN = nb.pts.reduce((a_, q) => V.add(a_, q), [0, 0]).map(v => v / nb.pts.length);

@@ -749,7 +749,7 @@
       let best = null;
       cands.forEach((cd, i) => {
         const R = rectOf(str, cd.p, h, cd.rot || 0, cd.align || 'L');
-        const sc = scoreRect(R) + i * 0.05;
+        const sc = scoreRect(R) + i * 0.02 + (cd.pen || 0);
         if (!best || sc < best.sc) best = { sc, cd, R };
       });
       if (!best || best.sc >= 1000) return null;
@@ -802,7 +802,7 @@
     if (!GISD) if (bN !== null) dpl([TJ(aF, bN), TJ(aF + 500, bN)], { c: 1, lw: 30 });
     if (oppB && !GISD) dpl(densify(oppB.pts).map(([a_, b_]) => TA(a_, b_)), { c: 1, lw: 30 });     // 도로 반대편 경계
     poly(DP, { c: 6, lw: 50 });
-    addObst(DP, 8);
+    addObst(DP, 40);                                                    // 글자가 인입관을 가로지르는 건 반대쪽으로 넘기는 것보다 나쁨
     c.gis.polys.forEach(p => { if (!p.frame && p.layer === c.pipeLayer) clipPoly((p.closed ? p.pts.concat([p.pts[0]]) : p.pts).map(TW), RD).forEach(s_ => addObst(s_, 6)); });
     if (GISD) {
       if (target) addObst((target.concat([target[0]])).map(TW), 2);
@@ -828,25 +828,32 @@
       let bo = null; opts.forEach((op, i) => { const R = rectOf(str, op.p, 2.07, 0, 'L'); const sc = scoreRect(R) + i * 0.05 + (segHit(op.r0, op.r1, { c: [0, 0], u: [1, 0], v: [0, 1], hw: 0, hh: 0 }) ? 0 : 0); if (!bo || sc < bo.sc) bo = { sc, op, R }; });
       if (bo && bo.sc < 1000) { const { r0, r1, sx } = bo.op; line(r0, r1, { c: 8 }); line(r1, V.add(r1, [sx * tw, 0]), { c: 8 }); placed.push(bo.R); text(str, bo.op.p, 2.07, { c: 8 }); addObst([r0, r1], 3); }
     }
-    // 경로 글자: 구간별 포장 연장 → PE 관경·연장·심도 → 전체 S/D (각각 경로를 따라 양쪽·여러 줄·앞뒤로 옮겨가며 빈 곳에)
-    const routeCands = (s0, h, prefSide) => {
-      const out = [], legLenM = L / Math.max(1, DP.length - 1);
-      [0, -0.12, 0.12, -0.25, 0.25, -0.38, 0.38, -0.5, 0.5].forEach(f => [prefSide, -prefSide].forEach(side => [0, 1, 2, 3, 4, 5, 6].forEach(row => {
-        const { p, t } = at(s0 + f * L), a_ = V.ang(t), rd = readable(a_), u = rd === a_ ? t : V.mul(t, -1), up = V.perp(u), gap = 0.8;
-        const off = side > 0 ? gap + row * (h + gap) : -(gap + h) - row * (h + gap);
-        out.push({ p: V.add(p, V.mul(up, off)), rot: rd, align: 'BC' });
-      })));
+    // 경로 글자: 분홍 배관 주기는 신설관 한쪽에 바로 붙이고, 포장면 표기(A.S.P·보도 등)는 반대쪽 각자 구간 옆에
+    //  sg: 진행 방향 기준 왼쪽(+1)/오른쪽(-1). 같은 쪽에서 앞뒤 → 바깥 줄 순으로 찾고, 반대쪽은 최후 수단(벌점)
+    const sideCands = (sList, h, sg, pen = 0) => {
+      const out = [];
+      [0, 1, 2, 3, 4].forEach(row => sList.forEach(s0 => {
+        const { p, t } = at(s0), a_ = V.ang(t), rd = readable(a_), u = rd === a_ ? t : V.mul(t, -1), up = V.perp(u), gap = 0.8;
+        const nrm = V.mul(V.perp(t), sg), off = V.dot(nrm, up) > 0 ? gap + row * (h + gap) : -(gap + h) - row * (h + gap);
+        out.push({ p: V.add(p, V.mul(up, off)), rot: rd, align: 'BC', pen: pen + row * 1.5 });
+      }));
       return out;
     };
-    const sideFor = s0 => { const { t } = at(s0), a_ = V.ang(t), rd = readable(a_), u = rd === a_ ? t : V.mul(t, -1), up = V.perp(u); return (Math.abs(aOf(t)) < 0.3 && aOf(up) < 0) ? -1 : 1; };
-    segs.forEach((sg_, i) => { const [a_, b_] = cum[i], sm = (a_ + b_) / 2; place(`${SEG_LABEL[sg_.type]} S:${fmt1(sg_.len)}M`, 2.07, routeCands(sm, 2.07, sideFor(sm)), { c: SEG_COLOR[sg_.type] }); });
-    {
-      const legs = DP.slice(1).map((q, i) => V.len(V.sub(q, DP[i])));
-      let li = 0; legs.forEach((l, i) => { if (l > legs[li]) li = i; });
-      const sMid = (legs.slice(0, li).reduce((x, y) => x + y, 0) + legs[li] / 2) / drawLen * L;
-      place(`PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`, 2.07, routeCands(sMid, 2.07, sideFor(sMid)), { c: 6 });
-      place(`S:${fmt1(L)}M  D:${fmt1(D_NEW)}~${fmt1(D_MAIN)}M`, 2.07, routeCands(sMid, 2.07, sideFor(sMid)), { c: 7 });
-    }
+    const legsD = DP.slice(1).map((q, i) => V.len(V.sub(q, DP[i])));
+    let liD = 0; legsD.forEach((l, i) => { if (l > legsD[liD]) liD = i; });
+    const legS0 = legsD.slice(0, liD).reduce((x, y) => x + y, 0) / drawLen * L, legS1 = legS0 + legsD[liD] / drawLen * L, sMid = (legS0 + legS1) / 2;
+    const spread = (a_, b_) => { const m = (a_ + b_) / 2, d = (b_ - a_) / 2; return [0, -0.3, 0.3, -0.6, 0.6, -0.85, 0.85].map(f => m + f * d); };
+    const peTxt = `PE${ND}A ${fmt1(L)}M 심도${fmt1(D_NEW)}M`;
+    // 분홍 쪽 정하기: 두 쪽 중 바로 붙일 자리가 더 비어 있는 쪽 (같으면 건물 쪽)
+    const firstScore = sg => { const cs = sideCands(spread(legS0, legS1), 2.07, sg).slice(0, 7); return Math.min(...cs.map(cd => scoreRect(rectOf(peTxt, cd.p, 2.07, cd.rot, 'BC')))); };
+    const tMid = at(sMid).t, bldSide = V.dot(V.perp(tMid), uS) >= 0 ? 1 : -1;
+    const fs = { 1: firstScore(1), [-1]: firstScore(-1) };
+    const peSide = fs[bldSide] <= fs[-bldSide] + 0.5 ? bldSide : -bldSide;
+    place(peTxt, 2.07, sideCands(spread(legS0, legS1), 2.07, peSide).concat(sideCands(spread(legS0, legS1), 2.07, -peSide, 30)), { c: 6 });
+    segs.forEach((sg_, i) => {
+      const [a_, b_] = cum[i];
+      place(`${SEG_LABEL[sg_.type]} S:${fmt1(sg_.len)}M`, 2.07, sideCands(spread(a_, b_), 2.07, -peSide).concat(sideCands(spread(a_, b_), 2.07, peSide, 30)), { c: SEG_COLOR[sg_.type] });
+    });
     // 수요처 주소·건물명 (두 줄을 한 덩어리로)
     {
       const cW = lotPoly ? lotPoly.c : V.add(endW, V.mul(dir, 4)), dC = V.len(V.sub(cW, endW)), toC = dC > 0.1 ? V.norm(V.sub(cW, endW)) : dir;
@@ -892,6 +899,22 @@
       const cands = [];
       [-14, -22, -30, -40].forEach(da => [0, 20, -20, 40, -40, 60].forEach(db => cands.push({ p: V.add(O, V.add(V.mul(uS, da), V.mul(uA, db))), rot: 30, align: 'MC' })));
       place('도로', 3.0, cands, {});
+    }
+
+    { // 방위표: 수치지도 좌표의 북(+Y)·동(+X)을 상세도(비스듬한 투영) 방향으로 옮겨 그림. 빈 모서리에 배치
+      const nD = V.norm(V.sub(TW(V.add(tee, [0, 1])), TW(tee))), eD = V.norm(V.sub(TW(V.add(tee, [1, 0])), TW(tee)));
+      const R_ = 6.5, m_ = R_ + 6;
+      const spots = [[RD[2] - m_, RD[3] - m_], [RD[0] + m_, RD[3] - m_], [RD[2] - m_, RD[1] + m_], [RD[0] + m_, RD[1] + m_]];
+      let bc = null;
+      spots.forEach((q, i) => { const Rq = { c: q, u: [1, 0], v: [0, 1], hw: R_ + 4, hh: R_ + 4 }; const sc = scoreRect(Rq) + i * 0.5; if (!bc || sc < bc.sc) bc = { sc, q, Rq }; });
+      const C0 = bc.q; placed.push(bc.Rq);
+      circ(C0, R_, { c: 7, lw: 18 });
+      line(V.add(C0, V.mul(nD, -R_)), V.add(C0, V.mul(nD, R_)), { c: 7, lw: 18 });
+      line(V.add(C0, V.mul(eD, -R_)), V.add(C0, V.mul(eD, R_)), { c: 7, lw: 18 });
+      const tip = V.add(C0, V.mul(nD, R_ + 2.5)), pn = V.perp(nD);
+      const tri = [tip, V.add(C0, V.mul(pn, 1.8)), V.add(C0, V.mul(pn, -1.8))];
+      hatch([tri], 'SOLID', { c: 1 }); poly(tri, { c: 1, closed: true });
+      [['N', nD], ['E', eD], ['S', V.mul(nD, -1)], ['W', V.mul(eD, -1)]].forEach(([t_, d_]) => text(t_, V.add(C0, V.mul(d_, R_ + (t_ === 'N' ? 5.2 : 3.4))), t_ === 'N' ? 3.0 : 2.4, { align: 'MC', c: t_ === 'N' ? 1 : 7 }));
     }
 
     /* ---------- SECTION */
@@ -1152,7 +1175,7 @@
   }
 
   // 수정할 때마다 올림 (웹 화면 제목 옆에 표시)
-  const VERSION = 'v1.16 (2026-11-04)', VERSION_NOTE = '상세도 이격거리·도로폭·전체연장 치수선 제거, 글자끼리·배관과 겹치지 않게 자동 배치';
+  const VERSION = 'v1.18 (2026-11-05)', VERSION_NOTE = '상세도에 방위표(N·E·S·W) 추가 — 비스듬한 상세도 방향에 맞춰 표시';
   return { VERSION, VERSION_NOTE, readGisDxf, guessPipeLayer, snapTee, readOrderSheet, splitAddr, buildDrawing, writeDxf, buildPdf, baseKeyFor, decodeLines, SEG_LABEL };
 });
 

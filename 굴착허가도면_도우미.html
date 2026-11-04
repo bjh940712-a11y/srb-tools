@@ -625,13 +625,24 @@
     let li_ = -1;
     for (let i = abPts.length - 1; i > 0; i--) if (Math.abs(abPts[i][0] - abPts[i - 1][0]) > 1e-6) { li_ = i; break; }
     const pa0 = li_ > 0 ? abPts[li_ - 1][0] : 0, pa1 = li_ > 0 ? abPts[li_][0] : endAB[0];
-    const Pb = li_ > 0 ? abPts[li_][1] : endAB[1];
+    let Pb = li_ > 0 ? abPts[li_][1] : endAB[1];
     // 앞 경계선: 인입 지점 주변(±3m) 건물 모서리 중 도로에 가장 가까운 선, 마지막 직각 구간 안으로 제한
     // (수요처·옆집 건물 각각에서 인입 끝점에 가장 가까운 모서리)
     const nearA = [tAB, nAB].map(ps => { let m = null, md = 4; ps.forEach(q => { const d_ = Math.hypot(q[0] - pa1, q[1] - Pb); if (d_ < md) { md = d_; m = q; } }); return m; }).filter(Boolean).map(q => q[0]);
     const lo = Math.min(pa0, pa1) + Math.min(0.3, Math.abs(pa1 - pa0) / 2), hi = Math.max(pa0, pa1);
     // 주변 건물이 없을 때: 끝에 평행 구간이 이어지면(ㄱ자) 그 구간은 대지 안으로 보고 직각 구간 중간에 경계
-    const aF = nearA.length ? Math.min(hi, Math.max(lo, Math.min(...nearA))) : (li_ > 0 && li_ < abPts.length - 1 ? (pa0 + pa1) / 2 : hi);
+    let aF = nearA.length ? Math.min(hi, Math.max(lo, Math.min(...nearA))) : (li_ > 0 && li_ < abPts.length - 1 ? (pa0 + pa1) / 2 : hi);
+    // 앞 경계선은 항상 기존관보다 건물 쪽(0.5m 이상)에 둠. 경로가 도로 쪽으로 돌아 들어온 경우(마지막 구간이 기존관을 넘나듦)는
+    // 경로 대신 끝점 주변 건물 모서리로 정하고, 경로가 그 선에 못 미치면 끝점을 인입 지점으로 봄
+    if (aF < 0.5) {
+      const nA = [tAB, nAB].map(ps => { let m = null, md = 6; ps.forEach(q => { const d_ = Math.hypot(q[0] - endAB[0], q[1] - endAB[1]); if (d_ < md) { md = d_; m = q; } }); return m; }).filter(Boolean).map(q => q[0]).filter(v => v > 0.3);
+      aF = Math.max(0.5, nA.length ? Math.min(...nA) : endAB[0]);
+      Pb = endAB[1];
+      for (let i = abPts.length - 1; i > 0; i--) {
+        const [a0, b0] = abPts[i - 1], [a1, b1] = abPts[i];
+        if (Math.abs(a1 - a0) > 1e-6 && (a0 - aF) * (a1 - aF) <= 0) { Pb = b0 + (b1 - b0) * (aF - a0) / (a1 - a0); break; }
+      }
+    }
     // 옆집 경계: 끝점에서 가장 가까운 옆집 외곽점의 b (기존관과 평행 방향 거리)
     let bN = null, sN = 1;
     if (nb) {

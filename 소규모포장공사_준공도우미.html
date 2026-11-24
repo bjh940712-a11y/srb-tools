@@ -116,7 +116,6 @@
     <a href="공사계획_신고승인_작성_도우미.html">④ 공사계획 신고/승인 작성 도우미</a>
     <a href="도로점용허가서류_도우미.html">⑤ 도로점용허가서류 도우미</a>
     <a href="공사일정관리_도우미.html">⑥ 공사 일정 관리 도우미</a>
-    <a href="굴착허가도면_도우미.html">⑦ 굴착허가 도면 도우미</a>
   </div>
   <h1>소규모 포장공사 준공보고 도우미</h1>
   <p class="sub">준공계 PDF 업로드 → 준공검사조서 작성 → 결재문서 제목/본문 복사. 모든 처리는 브라우저 안에서만 이루어집니다.</p>
@@ -463,7 +462,9 @@ function buildPrintJGS(){
   const dparts = dateStr.split('-');
   const dateKr = dparts.length===3 ? `${dparts[0]}년 ${dparts[1]}월 ${dparts[2]}일` : dateStr;
 
-  const row = (n,label,val)=>`<tr>${td(n+'. '+label,'text-align:left;font-weight:700;width:170px;')}${td(val,'text-align:left;padding-left:10px;')}</tr>`;
+  // 공사명~준공금 청구금액 표는 배관 준공검사조서와 같이 글자를 11px→14.5px로 키우고
+  // 줄 높이(padding)도 넉넉히 잡아 한눈에 들어오게 한다.
+  const row = (n,label,val)=>`<tr>${td(n+'. '+label,'text-align:left;font-weight:700;width:170px;font-size:14.5px;padding:8px 10px;')}${td(val,'text-align:left;font-size:14.5px;padding:8px 10px 8px 14px;')}</tr>`;
   let html = `<div style="padding:24px;background:#fff;width:820px;font-family:'Malgun Gothic',sans-serif;border:2px solid #000;">`+
     `<div style="font-size:22px;font-weight:700;text-align:center;letter-spacing:10px;margin-bottom:20px;">준공검사조서</div>`+
     `<table style="border-collapse:collapse;width:100%;margin-bottom:16px;">`+

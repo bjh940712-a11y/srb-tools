@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>공사지원 도우미 - 도로점용허가서류 도우미</title>
+<title>공사지원 도우미 - 도로점용허가서류 도우미 v1.1</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -92,8 +92,10 @@
     <a href="공사계획_신고승인_작성_도우미.html">④ 공사계획 신고/승인 작성 도우미</a>
     <a href="도로점용허가서류_도우미.html" class="on">⑤ 도로점용허가서류 도우미</a>
     <a href="공사일정관리_도우미.html">⑥ 공사 일정 관리 도우미</a>
+    <a href="굴착허가도면_도우미.html">⑦ 굴착허가 도면 도우미</a>
   </div>
-  <h1>도로점용허가서류 도우미</h1>
+  <h1>도로점용허가서류 도우미 <span id="verTag" style="font-size:13px;font-weight:600;color:#fff;background:#2f6f9f;border-radius:10px;padding:2px 9px;vertical-align:middle">v1.1 (2026-11-25)</span></h1>
+  <p id="verNote" style="margin:-4px 0 8px;font-size:12px;color:#667">최근 수정: 폐지공사 지원(영구점용 항목 제외), 사진대지 폐지시트·사진 위 도형 반영, 점용장소 "수요처명(구주소)" 표기, 메뉴에 ⑦ 추가</p>
   <p class="sub">소규모 품의 원본 엑셀 업로드 → 현장 목록 확인/수정 → 도로점용허가신청서·도로굴착총괄표·굴착허가점용료 PDF 3종 자동 생성. 모든 처리는 브라우저 안에서만 이루어집니다(서버 업로드 없음).</p>
 
   <div class="card">
@@ -188,7 +190,7 @@ const COMPANY = {
   addr:'경주시 유림로5번길 183', tel:'054-778-8114', ceo:'김 준 석'
 };
 
-let sites = []; // {name, oldAddr, newAddr, dia, len, pave, due, _src}
+let sites = []; // {name, oldAddr, newAddr, dia, len, pave, due, abandon(폐지공사: 영구점용물 없음), _src}
 let photoSites = []; // {sheetName, name, oldAddr, title, loc, img1, img2, _src}
 let loadedFiles = []; // {name, siteCount, photoCount, error}
 
@@ -301,6 +303,8 @@ async function loadOneFile(file){
   for(let c=0;c<subRow.length;c++){ if(/^포장종별\d$/.test(norm(subRow[c]))) paveLenCols.push(c+1); }
   const splitAddr = colOld>=0 && norm(subRow[colOld])==='읍면동' && norm(subRow[colOld+1])==='번지';
 
+  // 품의서 맨 위 제목에 "폐지"가 들어 있으면(예: "11월 1차 폐지 공사 품의") 파일 전체를 폐지공사로 본다
+  const fileAbandon = rows.slice(0,3).some(rw=>rw.some(c=>/폐지/.test(String(c))));
   const newSites = [];
   for(let r=dataStart;r<rows.length;r++){
     const row = rows[r]||[];
@@ -316,9 +320,10 @@ async function loadOneFile(file){
     nameStr = nameStr.split(/\r?\n/)[0].trim().replace(/^영천시\s+/,''); // "(신청인:..)/전화번호" 같은 둘째 줄 이하와 앞의 "영천시"는 제외
     let len = Number(row[colLen])||0;
     let dia = Number(row[colDia])||0;
+    let abandon = fileAbandon; // 폐지공사 여부(영구점용물 없음)
     if(len <= 0){ // 배관 연장이 없으면(폐지공사) 포장공사 연장 합계를 점용 길이로 사용
       const pl = paveLenCols.reduce((s,c)=>s+(Number(row[c])||0), 0);
-      if(pl > 0) len = pl;
+      if(pl > 0){ len = pl; abandon = true; }
     }
     // 연장이 0인 행은 실제 굴착 현장이 아니라 병합 셀 잔재나 소계용 잡음 행일 가능성이 높으므로
     // 표를 끝냈다고 단정하지 않고(뒤에 진짜 데이터가 더 있을 수 있음) 이 행만 건너뛴다.
@@ -333,6 +338,7 @@ async function loadOneFile(file){
       newAddr: String(colNew>=0?row[colNew]:'').trim(),
       dia,
       len,
+      abandon,
       pave: String(colPave>=0?row[colPave]:'A.S.P').trim().replace(/^ASP$/i,'A.S.P')||'A.S.P', // 폐지 품의서는 'ASP'로 표기
       due: String(colDue>=0?row[colDue]:'').trim(),
       _src: file.name
@@ -879,8 +885,8 @@ function computeTotalRows(){
   const k = getConsts();
   return sites.map(s=>{
     const excavArea = s.len*k.excavW;
-    const occW = s.dia/1000;
-    const occArea = occW*s.len;
+    const occW = s.abandon ? 0 : s.dia/1000;      // 폐지공사는 영구점용물이 없어 점용폭/점용면적 없음
+    const occArea = s.abandon ? 0 : occW*s.len;
     return {...s, excavArea, occW, occArea};
   });
 }
@@ -890,7 +896,7 @@ function computeFeeRows(){
     const area = s.len*k.excavW;
     // 점용료는 지정한 버림단위 미만 절사 - 일시/영구 각각 절사한 뒤 합계를 구한다
     const ilsi = floorToUnit(area*k.ilsiUnit*k.ilsiDiscount*k.ilsiDays, k.roundUnit);
-    const perm = floorToUnit(k.permUnit*k.permDiscount*k.permMonths/k.yearMonths*s.len, k.roundUnit);
+    const perm = s.abandon ? 0 : floorToUnit(k.permUnit*k.permDiscount*k.permMonths/k.yearMonths*s.len, k.roundUnit); // 폐지공사는 영구점용료 없음
     return {...s, no:i+1, area, ilsi, perm, sum: ilsi+perm};
   });
 }
@@ -1012,8 +1018,8 @@ function buildTotalHtml(){
     ${td(fmt(r.len,1))}
     ${td(fmt(getConsts().excavW,1))}
     ${td(fmt(r.excavArea,1))}
-    ${td(fmt(r.occW,3))}
-    ${td(fmt(r.occArea,3))}
+    ${td(r.abandon?'':fmt(r.occW,3))}
+    ${td(r.abandon?'':fmt(r.occArea,3))}
     ${td('심의 제외')}
   </tr>`).join('');
   const sumLen = rows.reduce((s,r)=>s+r.len,0);
@@ -1026,7 +1032,7 @@ function buildTotalHtml(){
       <colgroup><col style="width:26%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:10%"><col style="width:9%"></colgroup>
       <thead><tr>${th('공사구간')}${th('구분')}${th('포장\n종별')}${th('관경\n(A)')}${th('연장\n(m)')}${th('굴착폭\n(m)')}${th('굴착면적\n(㎡)')}${th('점용폭\n(m)')}${th('점용면적\n(㎡)')}${th('비고')}</tr></thead>
       <tbody>${body}
-        <tr>${td('계','font-weight:700;')}${td('')}${td('')}${td('')}${td(fmt(sumLen,1),'font-weight:700;')}${td('')}${td(fmt(sumExcav,1),'font-weight:700;')}${td('')}${td(fmt(sumOcc,3),'font-weight:700;')}${td('')}</tr>
+        <tr>${td('계','font-weight:700;')}${td('')}${td('')}${td('')}${td(fmt(sumLen,1),'font-weight:700;')}${td('')}${td(fmt(sumExcav,1),'font-weight:700;')}${td('')}${td(rows.some(r=>!r.abandon)?fmt(sumOcc,3):'','font-weight:700;')}${td('')}</tr>
       </tbody>
     </table>
   </div>`;
@@ -1048,7 +1054,7 @@ function buildFeeHtml(){
     ${td(fmt(r.area,1))}
     ${td(fmt(r.sum,feeDec))}
     ${td(fmt(r.ilsi,feeDec))}
-    ${td(fmt(r.perm,feeDec))}
+    ${td(r.abandon?'':fmt(r.perm,feeDec))}
   </tr>`).join('');
   const sumLen = rows.reduce((s,r)=>s+r.len,0), sumArea = rows.reduce((s,r)=>s+r.area,0);
   const sumIlsi = rows.reduce((s,r)=>s+r.ilsi,0), sumPerm = rows.reduce((s,r)=>s+r.perm,0);
@@ -1060,7 +1066,7 @@ function buildFeeHtml(){
         <tr>${th('순번','')}${th('점 용 장 소 (위치)','')}${th('도로\n관리청','')}${th('관경','')}${th('연장(m)','')}${th('면적(㎡)','')}${th('합계\n(a+b)','')}${th('일시\n점용료-ⓐ','')}${th('영구\n점용료-ⓑ','')}</tr>
       </thead>
       <tbody>${body}
-        <tr>${td('계','font-weight:700;')}${td('')}${td('')}${td('')}${td(fmt(sumLen,1),'font-weight:700;')}${td(fmt(sumArea,1),'font-weight:700;')}${td(fmt(sumIlsi+sumPerm,feeDec),'font-weight:700;')}${td(fmt(sumIlsi,feeDec),'font-weight:700;')}${td(fmt(sumPerm,feeDec),'font-weight:700;')}</tr>
+        <tr>${td('계','font-weight:700;')}${td('')}${td('')}${td('')}${td(fmt(sumLen,1),'font-weight:700;')}${td(fmt(sumArea,1),'font-weight:700;')}${td(fmt(sumIlsi+sumPerm,feeDec),'font-weight:700;')}${td(fmt(sumIlsi,feeDec),'font-weight:700;')}${td(rows.some(r=>!r.abandon)?fmt(sumPerm,feeDec):'','font-weight:700;')}</tr>
       </tbody>
     </table>
   </div>`;

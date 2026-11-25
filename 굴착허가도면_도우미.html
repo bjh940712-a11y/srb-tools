@@ -132,7 +132,7 @@
         <button class="btn secondary sm" id="zFit">전체</button>
       </div>
     </div>
-    <div class="hint">① 지도에서 <b>건물(부지) 쪽</b>을 클릭하면 가장 가까운 기존관 위에 분기점이 잡히고, 배관과 직각인 직선 인입관이 표시됩니다.
+    <div class="hint" id="mapHint">① 지도에서 <b>건물(부지) 쪽</b>을 클릭하면 가장 가까운 기존관 위에 분기점이 잡히고, 배관과 직각인 직선 인입관이 표시됩니다.
       ② 꺾어야 하면 이어서 <b>꺾이는 점을 차례로 클릭</b>하세요(ㄱ·ㄷ자 등). 마지막 클릭이 인입 끝점이며, <b>끝점이 있는 쪽을 건물 쪽</b>으로 판단합니다(분기점은 배관 위를 찍어도 됩니다).
       '직각 맞춤'을 켜 두면 각 구간이 배관·앞 구간과 직각 또는 평행으로 맞춰지고, 좁은 골목이면 첫 구간부터 배관을 따라 그릴 수 있습니다.
       도면의 연장은 경로 길이와 관계없이 발주서(포장 구간) 값으로 표기됩니다. (휠: 확대/축소, 드래그: 이동)</div>
@@ -837,6 +837,21 @@
     const J = V.add(O, S.J_rel), Jd = V.sub(J, O);
     let DP = abPts.map(([a_, b_]) => V.add(TA(a_, b_), Jd));
     if (ABAN) { const l0 = DP.slice(1).reduce((a_, q, i) => a_ + V.len(V.sub(q, DP[i])), 0), f = Math.max(1, 32 / Math.max(l0, 1e-6)); DP = DP.map(q => V.add(J, V.mul(V.sub(q, J), f))); }   // S=NONE: 짧은 철거 구간은 보이게 늘림
+    if (target && c.detailStyle !== 'simple') {   // 수요처 건물(빨간 외곽선)을 넘어서는 배관은 그리지 않음: 처음 닿는 곳에서 끊음
+      const TP = target.concat([target[0]]).map(TW);
+      let acc_ = 0, best = null;
+      for (let i = 0; i + 1 < DP.length; i++) {
+        const p0 = DP[i], d0 = V.sub(DP[i + 1], DP[i]), sl = V.len(d0);
+        for (let j = 0; j + 1 < TP.length; j++) {
+          const e0 = V.sub(TP[j + 1], TP[j]), den = crs(d0, e0); if (Math.abs(den) < 1e-9) continue;
+          const w0 = V.sub(TP[j], p0), t = crs(w0, e0) / den, u = crs(w0, d0) / den;
+          if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+          const dd = acc_ + t * sl; if (dd > 3 && (!best || dd < best.dd)) best = { dd, i, p: V.add(p0, V.mul(d0, t)), u0: V.norm(d0) };
+        }
+        acc_ += sl;
+      }
+      if (best) DP = DP.slice(0, best.i + 1).concat([V.sub(best.p, V.mul(best.u0, 0.4))]);
+    }
     // 경계선(빨강): 앞 경계 + 옆집 경계
     const TJ = (a_, b_) => V.add(TA(a_, b_), Jd);
     const fb0 = Pb - 500, fb1 = Pb + 500;                                // 상세도 테두리까지 끊김 없이
@@ -1022,17 +1037,13 @@
     line([XS0 - 3.5, yP], [XS0 + 3.5, yP], { c: 1, lw: 35 }); line([XS0 - 4.3, yP - .5], [XS0 - 3.5, yP], { c: 1 }); line([XS0 + 3.5, yP], [XS0 + 4.3, yP - .5], { c: 1 });
     line([XS0 + 1.2, yP + .1], [XS0 + 1.6, G + 1.4], { c: 8, layer: '바탕선' }); line([XS0 + 1.6, G + 1.4], [XS0 + 3.8, G + 1.4], { c: 8, layer: '바탕선' });
     text('보호철판', [XS0 + 4.0, G + 0.8], 1.89, { style: '지명', layer: '바탕선', c: 8 });
-    if (ABAN) {   // 분기점에서 짧게 남기고 CAP 마감, 철거 구간 이후 기존관은 존치(점선)
-      const xc = XS0 + 2.6, xr = Math.max(xc + 1.5, xs(REM));
+    if (ABAN) {   // 분기점에서 짧게 남기고 CAP 마감 (마감 이후 배관은 그리지 않음)
+      const xc = XS0 + 2.6;
       line([XS0 + 0.3, yN], [xc, yN], { c: 6, lw: 35, layer: '도면층3' }); line([XS0 + 0.3, yN - 0.6], [xc, yN - 0.6], { c: 6, lw: 35, layer: '도면층3' });
       line([XS0 + 0.3, yN - 0.6], [XS0 + 0.3, yM - 0.2], { c: 6, layer: '도면층3' });
       line([xc, yN + 0.5], [xc, yN - 1.1], { c: 6, lw: 70, layer: '도면층3' });                 // CAP
-      line([xr, yN], [XE, yN], { c: 5, layer: '도면층3', lt: 'HIDDEN' }); line([xr, yN - 0.6], [XE, yN - 0.6], { c: 5, layer: '도면층3', lt: 'HIDDEN' });
       line([xc + 0.3, yN - 0.3], [xc + 5.5, yN - 3.2], { c: 6, layer: '바탕선' }); arrow([xc + 0.3, yN - 0.3], [-1, 0.55], 1.2, 6);
       text(`${ND}A CAP마감`, [xc + 5.8, yN - 4.0], 2.62, { style: 'STYLE1', layer: '도면층3' });
-      const xl = Math.min(XE - 20, Math.max(xr + 2, xc + 26));
-      line([xl, yN - 0.6], [xl, yN - 6.0], { c: 8, layer: '바탕선' }); line([xl, yN - 6.0], [xl + 2, yN - 6.0], { c: 8, layer: '바탕선' });
-      text(`기존관LP${ND}A (존치)`, [xl + 2.2, yN - 6.5], 1.89, { style: '지명', layer: '바탕선' });
     } else {
       line([XS0 + 0.3, yN], [XE, yN], { c: 6, lw: 35, layer: '도면층3' }); line([XS0 + 0.3, yN - 0.6], [XE, yN - 0.6], { c: 6, lw: 35, layer: '도면층3' });
       line([XS0 + 0.3, yN - 0.6], [XS0 + 0.3, yM - 0.2], { c: 6, layer: '도면층3' });
@@ -1051,7 +1062,7 @@
       text(t, [x - 1.4, (y0 + y1) / 2], 1.8, { rot: 90, style: 'Standard', layer: '도면층3', align: 'MC' });
     };
     vdim(XS0 - 7.5, G, yM, `${fmt1(D_MAIN)}M`);
-    vdim(XE - 4.5, G, yN, `${fmt1(D_NEW)}M`);
+    if (!ABAN) vdim(XE - 4.5, G, yN, `${fmt1(D_NEW)}M`);                 // 폐지: 마감 이후 배관이 없으니 건물 쪽 심도 생략
     const yd = G + 10.6;
     line([XS0, G + 1.2], [XS0, yd + 2.5], { layer: '도면층3' }); line([XE, yd - 2.5], [XE, yd + 2.5], { layer: '도면층3' });
     line([XS0, yd], [XE, yd], { layer: '도면층3' }); arrow([XS0, yd], [-1, 0], 3.0); arrow([XE, yd], [1, 0], 3.0);
@@ -1062,18 +1073,18 @@
 
     /* ---------- 종단면도 */
     const PF = M.profile, x0 = PF.x0;
-    const HS = Math.min(PF.hs, (PF.xmax - x0 - 4) / L);
+    const LPf = ABAN ? Math.max(L - REM, 0.1) : L;                       // 폐지: 종단은 존치 구간(기존 − 철거) 길이로
+    const HS = Math.min(PF.hs, (PF.xmax - x0 - 4) / LPf);
     const ye = el => PF.y37 + (el - 37) * PF.vs;
-    const xe = x0 + L * HS;
+    const xe = x0 + LPf * HS;
     line([x0, ye(GL)], [PF.xmax, ye(GL)], { c: 256, layer: 'DIM' });
     [x0, xe].forEach(x => line([x, PF.y37], [x, ye(GL)], { c: 256, layer: '도면층4' }));
     translatePrims(S.prof_tee, [x0, ye(IL_NEW)]);
     if (!ABAN) translatePrims(S.prof_end, [xe, ye(IL_NEW)]);
     line([x0, ye(IL_NEW)], [xe, ye(IL_NEW)], ABAN ? { c: 5, layer: 'DIM' } : { c: 6, lw: 35, layer: 'DIM' });
-    if (ABAN) line([x0, ye(IL_NEW)], [x0 + Math.min(REM, L) * HS, ye(IL_NEW)], { c: 6, lw: 35, layer: 'DIM' });
     line([x0, ye(IL_MAIN) - 0.6], [x0 + 1.9, PF.y37 + 12.1], { c: 21, layer: '바탕선' }); line([x0 + 1.9, PF.y37 + 12.1], [x0 + 2.6, PF.y37 + 12.1], { c: 21, layer: '바탕선' });
     text(ABAN ? `절단후 ${ND}A CAP마감` : `SPLIT TEE ${MD}*${ND}A`, [x0 + 2.7, PF.y37 + 11.6], 1.11, { style: '지명', layer: '바탕선', c: 21 });
-    text(`${SCODE}LP${ND}A(${fmt1(L)}M)`, [xe + 0.6, ye(IL_NEW) - 0.4], 1.11, { style: '지명', layer: '바탕선' });
+    text(`${SCODE}LP${ND}A(${fmt1(LPf)}M)`, [xe + 0.6, ye(IL_NEW) - 0.4], 1.11, { style: '지명', layer: '바탕선' });
     if (!ABAN) text(`내관연결${ND}A`, [xe + 1.0, ye(IL_NEW) - 3.0], 1.11, { style: '지명', layer: '바탕선', c: 21 });
     if (rb) {
       const bx = x0 + rbStart * HS;
@@ -1082,12 +1093,12 @@
       text('우수BOX', [bx + rb.w * HS + 0.5, ye(GL) - 3.5], 1.11, { style: '지명', layer: '바탕선' });
     }
     const vt = (s, x, y) => text(s, [x + 1.0, y], 1.5, { rot: 90, style: 'STYLE1', layer: 'DIM', c: 256 });
-    [[x0, ['NO.0', '0', '0', fmt1(GL), fmt1(IL_MAIN), fmt1(D_MAIN)]], [xe, ['NO.0', fmt1(L), fmt1(L), fmt1(GL), fmt1(IL_NEW), fmt1(D_NEW)]]].forEach(([x, vals]) => {
+    [[x0, ['NO.0', '0', '0', fmt1(GL), fmt1(IL_MAIN), fmt1(D_MAIN)]], [xe, ['NO.0', fmt1(LPf), fmt1(LPf), fmt1(GL), fmt1(IL_NEW), fmt1(D_NEW)]]].forEach(([x, vals]) => {
       ['sta', 'dist', 'add', 'gl', 'il', 'dep'].forEach((rk, i) => vt(vals[i], x, PF.rows[rk]));
       PF.ticks.forEach(([a, b]) => line([x, a], [x, b], { c: 256, layer: 'DIM' }));
     });
-    vt(`+${fmt1(L)}M`, xe + 2.0, PF.rows.sta - 0.5);
-    const rSegs = ABAN ? [{ type: segs[0].type, len: L }] : segs, rCum = ABAN ? [[0, L]] : cum;   // 폐지: 비고는 기존관 전체 연장
+    vt(`+${fmt1(LPf)}M`, xe + 2.0, PF.rows.sta - 0.5);
+    const rSegs = ABAN ? [{ type: segs[0].type, len: LPf }] : segs, rCum = ABAN ? [[0, LPf]] : cum;   // 폐지: 비고는 존치 구간 연장
     rCum.forEach(([a]) => line([x0 + a * HS, PF.remark[0]], [x0 + a * HS, PF.remark[2]], { c: 256, layer: 'DIM' }));
     line([xe, PF.remark[0]], [xe, PF.remark[2]], { c: 256, layer: 'DIM' });
     line([x0, PF.remark[1]], [PF.xmax, PF.remark[1]], { c: 256, layer: 'DIM' });
@@ -1102,8 +1113,15 @@
     const TB = M.table;
     const tRows = ABAN ? [[SEG_LABEL[segs[0].type], `기존 ${ND}A`, `${fmt1(L)}M`, SCODE, 'LP'], [SEG_LABEL[segs[0].type], `철거 ${ND}A`, `${fmt1(REM)}M`, SCODE, 'LP']]
       : segs.map(s => [SEG_LABEL[s.type], `${ND}A`, `${fmt1(s.len)}M`, 'KSM3514', 'LP']);
-    tRows.slice(0, TB.rows.length).forEach((row, i) => row.forEach((v, j) => text(v, [TB.cols[j], TB.rows[i]], 1.611, { style: '지명', layer: '바탕선', c: 256 })));
-    [`${ND}A`, `${fmt1(ABAN ? L - REM : L)}M`, SCODE, 'LP'].forEach((v, j) => text(v, [TB.cols[j + 1], TB.sum], 1.611, { style: '지명', layer: '바탕선', c: 256 }));
+    // 칸 가운데 정렬, 칸보다 길면 글자 크기를 줄여 칸 안에 넣음 (양식의 세로 구분선 기준)
+    const CB = TB.cells || [219387.14, 219400.31, 219410.83, 219421.82, 219433.7, 219442.12];
+    const cellText = (v, j, y) => {
+      const w = CB[j + 1] - CB[j] - 1.2, est = [...String(v)].reduce((a_, ch) => a_ + (ch.charCodeAt(0) > 0x1100 ? 1.05 : ch === ' ' ? 0.45 : 0.72), 0);
+      const h = Math.min(1.611, w / Math.max(est, 0.1));
+      text(v, [(CB[j] + CB[j + 1]) / 2, y], h, { style: '지명', layer: '바탕선', c: 256, align: 'BC' });
+    };
+    tRows.slice(0, TB.rows.length).forEach((row, i) => row.forEach((v, j) => cellText(v, j, TB.rows[i])));
+    [`${ND}A`, `${fmt1(ABAN ? L - REM : L)}M`, SCODE, 'LP'].forEach((v, j) => cellText(v, j + 1, TB.sum));
     text(`${c.dong} ${c.name} ${ABAN ? '폐지' : '인입 공급관'}`, M.title.name, 1.9465, { style: '굴림', layer: 'DIM', c: 7 });
     text(c.date, M.title.date, 1.6926, { style: 'Standard', layer: 'DIM', c: 256 });
     const spaced = n => String(n || '').trim().replace(/\s+/g, '').split('').join('  ');
@@ -1276,7 +1294,7 @@
   }
 
   // 수정할 때마다 올림 (웹 화면 제목 옆에 표시)
-  const VERSION = 'v1.21 (2026-11-25)', VERSION_NOTE = '폐지 상세도: 분기점~철거 연장 구간만 그리고 끝에 ㄷ자 CAP 마감 표시 (그 너머 기존관은 생략)';
+  const VERSION = 'v1.24 (2026-11-25)', VERSION_NOTE = '상세도 배관이 수요처 빨간 외곽선을 넘지 않게, 폐지 종단 추가거리를 존치 길이(기존−철거)로, 제원표 글자를 칸 안에 맞춤';
   return { VERSION, VERSION_NOTE, guessMainPipe, readGisDxf, guessPipeLayer, snapTee, readOrderSheet, splitAddr, buildDrawing, writeDxf, buildPdf, baseKeyFor, decodeLines, SEG_LABEL };
 });
 
@@ -1363,6 +1381,7 @@ function pickRow(i){
 }
 
 /* ---------- 공사 구분 (인입 / 폐지) */
+const MAPHINT0=$('mapHint').innerHTML;
 function kind(){ return document.querySelector('input[name=kind]:checked').value; }
 function setKind(k){
   document.querySelector(`input[name=kind][value=${k}]`).checked=true;
@@ -1372,6 +1391,9 @@ function setKind(k){
   $('lbSegs').textContent=ab?'철거 굴착 구간 포장 (분기점 쪽)':'포장 구간 (분기점 → 건물 순서)';
   $('hint3').textContent=ab?'폐지는 분기점 쪽에서 철거 연장만큼 굴착·철거하고 CAP 마감, 나머지 기존 인입관은 존치로 그립니다. 제원표는 기존·철거·합계(존치)로 작성됩니다. 본관 관경은 수치지도 배관 주기(예: PE160)에서 자동으로 채워지며, 다르면 고쳐 주세요.'
     :'인입관 심도는 기존관 심도 − 0.1M, 지반고는 40.3으로 고정해 관정고를 계산합니다. 보호철판은 분기 지점에 항상 표시됩니다.';
+  $('mapHint').innerHTML=ab?'지도에서 <b>폐지할 인입관이 본관에서 갈라지는 곳</b>을 클릭하세요. 본관 위에 분기점이 잡히고, 클릭한 쪽을 건물 쪽으로 봅니다(본관 바로 위보다 건물 쪽으로 살짝 떨어뜨려 찍으세요). '
+    +'폐지는 <b>분기점 한 번만 찍으면 됩니다</b>. 디테일뷰에는 분기점에서 철거 연장만큼만 그리고 CAP 마감으로 끝냅니다. 기존 인입관 경로를 평면도에 표시하고 싶을 때만 이어서 점을 찍으세요. (휠: 확대/축소, 드래그: 이동)'
+    :MAPHINT0;
   updRouteInfo(); drawMap();
 }
 document.querySelectorAll('input[name=kind]').forEach(r=>r.onchange=()=>setKind(kind()));
@@ -1410,7 +1432,7 @@ $('fGis').onchange=async e=>{
       const cols=Object.keys(l.colors).join(','); const nm=/�/.test(l.name)?('레이어 '+(i+1)):l.name;
       o.textContent=`${nm} · 선 ${l.count}개 · 색 ${cols}${l.name===S.pipeLayer?' (추정)':''}`; if(l.name===S.pipeLayer) o.selected=true; sel.appendChild(o); });
     fitView(); drawMap(); $('st2').classList.remove('done');
-    toast('수치지도를 불러왔습니다. 인입 위치를 클릭하세요.');
+    toast(kind()==='abandon'?'수치지도를 불러왔습니다. 폐지 위치(분기점)를 클릭하세요.':'수치지도를 불러왔습니다. 인입 위치를 클릭하세요.');
   }catch(err){ alert('DXF를 읽지 못했습니다: '+err.message); }
   e.target.value='';
 };
@@ -1474,14 +1496,15 @@ function updRouteInfo(){
   const has=S.tee, n=S.route&&S.route.length>1?S.route.length-1:0;
   $('rUndo').disabled=!n; $('rReset').disabled=!has;
   const b=$('teeInfo');
-  if(!has){ b.style.display='none'; $('routeHint').textContent='① 건물 쪽을 클릭해 분기점을 정하세요.'; return; }
+  const AB=kind()==='abandon';
+  if(!has){ b.style.display='none'; $('routeHint').textContent=AB?'① 폐지할 인입관이 본관에서 갈라지는 곳(분기점)을 건물 쪽으로 살짝 떨어뜨려 한 번 클릭하세요.':'① 건물 쪽을 클릭해 분기점을 정하세요.'; return; }
   b.style.display='';
-  if(!n){ b.textContent='분기점 지정됨 · 직선 인입'; $('routeHint').textContent='② 꺾어야 하면 꺾이는 점을 차례로 클릭하세요. 직선이면 그대로 진행하면 됩니다.'; }
+  if(!n){ b.textContent=AB?'폐지 위치(분기점) 지정됨':'분기점 지정됨 · 직선 인입'; $('routeHint').textContent=AB?'폐지는 분기점 한 번이면 됩니다. 바로 ③으로 넘어가세요.':'② 꺾어야 하면 꺾이는 점을 차례로 클릭하세요. 직선이면 그대로 진행하면 됩니다.'; }
   else { let len=0; for(let i=1;i<S.route.length;i++) len+=Math.hypot(S.route[i][0]-S.route[i-1][0],S.route[i][1]-S.route[i-1][1]);
     const ab=kind()==='abandon', L=ab?(parseFloat($('vExist').value)||0):getSegs().reduce((a,s)=>a+s.len,0);
     b.textContent=`꺾인 경로 ${n}구간 · 지도상 ${len.toFixed(1)}m` + (L?` (${ab?'기존 연장':'발주서'} ${Math.round(L*10)/10}m)`:(ab?' → 기존 인입관 연장 칸에 넣으려면 클릭':''));
     S.routeLen=len;
-    $('routeHint').textContent='계속 클릭하면 점이 추가됩니다. 마지막 클릭이 인입 끝점입니다.'; }
+    $('routeHint').textContent=AB?'추가로 찍은 점은 기존 인입관 경로(평면도 표시용)로 쓰입니다. 필요 없으면 "분기점·경로 다시 지정" 후 분기점만 찍으세요.':'계속 클릭하면 점이 추가됩니다. 마지막 클릭이 인입 끝점입니다.'; }
 }
 cv.addEventListener('mouseup',e=>{
   if(drag && !drag.moved && S.gis && S.pipeLayer){
@@ -1515,7 +1538,7 @@ async function fontBytes(){ if(!S.fontBytes){ const r=await fetch('NotoSansKR-Su
 function fname(ext){ return `굴착허가도면_${kind()==='abandon'?'폐지_':''}${$('vDong').value}${$('vJibun').value}_${$('vName').value}.${ext}`; }
 function download(data,name,type){ const b=new Blob([data],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500); }
 $('btnMake').onclick=async()=>{
-  const miss=[]; if(!S.pkg) miss.push('표준 양식 패키지 등록'); if(!S.gis) miss.push('수치지도 DXF'); if(!S.tee) miss.push('지도에서 인입 위치 클릭');
+  const miss=[]; if(!S.pkg) miss.push('표준 양식 패키지 등록'); if(!S.gis) miss.push('수치지도 DXF'); if(!S.tee) miss.push(kind()==='abandon'?'지도에서 폐지 위치(분기점) 클릭':'지도에서 인입 위치 클릭');
   const segs=getSegs(); if(!segs.length) miss.push('포장 구간 연장');
   const AB=kind()==='abandon';
   if(!$('vMain').value) miss.push(AB?'본관(기존관) 관경':'기존관 관경'); if(!$('vJibun').value) miss.push('번지');

@@ -839,7 +839,12 @@
       }
       else if (GISD) dpl(pts, { c: p.pts === target ? 1 : (nb && p.pts === nb.pts ? 7 : 8), lw: p.pts === target ? 30 : (nb && p.pts === nb.pts ? 18 : 13) });
     });
-    translatePrims(S.tee, O);
+    // 폐지: 분기 T(분홍 T·검정 화살표)는 그리지 않고, 보호철판(초록)과 그 지시선만 CAP 마감 위치로 옮김
+    const isPlate = pr => pr.c === 3 || pr.c === 21;
+    const isTmark = pr => pr.c === 6 || (pr.c === 256 && (pr.t === 'line' || pr.t === 'solid'));
+    const capD = ABAN ? V.sub(TW(SVC.C), V.add(O, S.J_rel)) : [0, 0];
+    const teeDraw = ABAN ? [[S.tee.filter(isPlate), V.add(O, capD)], [S.tee.filter(pr => !isPlate(pr) && !isTmark(pr)), O]] : [[S.tee, O]];
+    teeDraw.forEach(([l_, o_]) => translatePrims(l_, o_));
     const tt = S.tee_text;
     // ---- 글자 배치기: 글자끼리, 글자와 인입관·기존관이 겹치지 않는 후보 위치를 고름
     const tW = (str, h) => [...str].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x1100 ? 1.05 : ch === ' ' ? 0.4 : 0.7) * h, 0);
@@ -888,11 +893,11 @@
     const fixText = (str, p_, h, o) => { if (!inD(p_)) return; placed.push(rectOf(str, p_, h, o.rot || 0, o.align || 'L', 0.8)); text(str, p_, h, o); };
     { // 분기 T·보호철판 기호 자체도 글자가 못 들어가게
       const pts = []; const walk = x => { if (Array.isArray(x) && x.length === 2 && typeof x[0] === 'number') pts.push(x); else if (Array.isArray(x)) x.forEach(walk); else if (x && typeof x === 'object') Object.values(x).forEach(walk); };
-      S.tee.forEach(pr => walk([pr.p, pr.q, pr.pts, pr.polys]));
-      if (pts.length) { const xs = pts.map(q => q[0] + O[0]), ys = pts.map(q => q[1] + O[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys); placed.push({ c: [(x0 + x1) / 2, (y0 + y1) / 2], u: [1, 0], v: [0, 1], hw: (x1 - x0) / 2, hh: (y1 - y0) / 2 }); }
+      teeDraw.forEach(([l_, o_]) => { pts.length = 0; l_.forEach(pr => walk([pr.p, pr.q, pr.pts, pr.polys]));
+      if (pts.length) { const xs = pts.map(q => q[0] + o_[0]), ys = pts.map(q => q[1] + o_[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys); placed.push({ c: [(x0 + x1) / 2, (y0 + y1) / 2], u: [1, 0], v: [0, 1], hw: (x1 - x0) / 2, hh: (y1 - y0) / 2 }); } });
     }
     if (!ABAN) fixText(`SPLIT TEE ${MD}*${ND}A`, V.add(O, tt.tee.p), tt.tee.h, { rot: tt.tee.rot, style: tt.tee.style });
-    fixText('보호철판 0.5M', V.add(O, tt.plate.p), tt.plate.h, { rot: tt.plate.rot, style: tt.plate.style, c: 21 });
+    fixText('보호철판 0.5M', V.add(V.add(O, capD), tt.plate.p), tt.plate.h, { rot: tt.plate.rot, style: tt.plate.style, c: 21 });
     // 인입관 (분기 T 끝에서 출발)
     const J = V.add(O, S.J_rel), Jd = V.sub(J, O);
     let DP = abPts.map(([a_, b_]) => V.add(TA(a_, b_), Jd));
@@ -1359,7 +1364,7 @@
   }
 
   // 수정할 때마다 올림 (웹 화면 제목 옆에 표시)
-  const VERSION = 'v1.26 (2026-11-25)', VERSION_NOTE = '폐지: 수치지도 기존 인입관에서 부지경계 쪽 철거 구간만 지우고 CAP(ㄷ) 표시, 상세도를 인입관 중심으로 크게';
+  const VERSION = 'v1.27 (2026-11-25)', VERSION_NOTE = '폐지: 상세도 분기점의 T 표기 삭제, 보호철판을 CAP 마감 지점으로 이동';
   return { VERSION, VERSION_NOTE, findService, snapAbandon, guessMainPipe, readGisDxf, guessPipeLayer, snapTee, readOrderSheet, splitAddr, buildDrawing, writeDxf, buildPdf, baseKeyFor, decodeLines, SEG_LABEL };
 });
 

@@ -313,7 +313,7 @@ async function loadOneFile(file){
       if(newSites.length || r-dataStart>30) break;
       continue;
     }
-    nameStr = nameStr.split(/\r?\n/)[0].trim(); // "(신청인:..)/전화번호" 같은 둘째 줄 이하는 제외
+    nameStr = nameStr.split(/\r?\n/)[0].trim().replace(/^영천시\s+/,''); // "(신청인:..)/전화번호" 같은 둘째 줄 이하와 앞의 "영천시"는 제외
     let len = Number(row[colLen])||0;
     let dia = Number(row[colDia])||0;
     if(len <= 0){ // 배관 연장이 없으면(폐지공사) 포장공사 연장 합계를 점용 길이로 사용
@@ -872,7 +872,7 @@ function periodText(){
 }
 
 /* ===================== 4. 파생 계산 ===================== */
-function locText(s){ const a=$('authority').value.trim(); return `${a} ${s.oldAddr} ${s.name} (${s.oldAddr})`; }
+function locText(s){ return `${s.name}(${s.oldAddr})`; } // 총괄표 공사구간·붙임 점용장소: "수요처명(구주소)"
 function mode(arr){ const c={}; arr.forEach(v=>c[v]=(c[v]||0)+1); return Object.keys(c).sort((a,b)=>c[b]-c[a])[0]; }
 
 function computeTotalRows(){
@@ -904,7 +904,7 @@ function buildAppHtml(){
   const totalLen = sites.reduce((s,x)=>s+x.len,0);
   const totalArea = sites.reduce((s,x)=>s+x.len*getConsts().excavW,0);
   const first = sites[0]||{oldAddr:'',name:''};
-  const locStr = sites.length ? `${a} ${first.oldAddr} ${first.name}${sites.length>1?` 외 ${sites.length-1}개소`:''} / ${fmt(totalArea,1)}㎡ (${fmt(totalLen,0)}m)` : '';
+  const locStr = sites.length ? `${first.oldAddr}${sites.length>1?` 외 ${sites.length-1}개소`:''} / ${fmt(totalArea,1)}㎡ (${fmt(totalLen,0)}m)` : '';
   const dia = mode(sites.map(s=>s.dia))||63;
 
   const F = "font-family:'Malgun Gothic','맑은 고딕',sans-serif;";

@@ -92,7 +92,6 @@
     <a href="공사계획_신고승인_작성_도우미.html">④ 공사계획 신고/승인 작성 도우미</a>
     <a href="도로점용허가서류_도우미.html" class="on">⑤ 도로점용허가서류 도우미</a>
     <a href="공사일정관리_도우미.html">⑥ 공사 일정 관리 도우미</a>
-    <a href="굴착허가도면_도우미.html">⑦ 굴착허가 도면 도우미</a>
   </div>
   <h1>도로점용허가서류 도우미</h1>
   <p class="sub">소규모 품의 원본 엑셀 업로드 → 현장 목록 확인/수정 → 도로점용허가신청서·도로굴착총괄표·굴착허가점용료 PDF 3종 자동 생성. 모든 처리는 브라우저 안에서만 이루어집니다(서버 업로드 없음).</p>
@@ -294,22 +293,47 @@ async function loadOneFile(file){
   }
   if(colName<0 || colDia<0 || colLen<0) throw new Error('표 열 구성을 인식하지 못했습니다.');
 
+  // [폐지공사 품의서 대응] 폐지 품의서는 새 배관이 없어서 배관공사 관경이 비어 있고 연장이 -1 등으로
+  // 들어가며, 실제 굴착(점용) 길이는 "포장공사 연장"(포장종별1~4의 연장)에 적혀 있다.
+  // 또 "주소"가 읍면동/번지 두 칸으로 나뉘어 있다.
+  const colDiaOld = findCol(/^관경\(A\)$/, subRow); // 기존관 관경(폐지 시 관경 대용)
+  const paveLenCols = [];
+  for(let c=0;c<subRow.length;c++){ if(/^포장종별\d$/.test(norm(subRow[c]))) paveLenCols.push(c+1); }
+  const splitAddr = colOld>=0 && norm(subRow[colOld])==='읍면동' && norm(subRow[colOld+1])==='번지';
+
   const newSites = [];
   for(let r=dataStart;r<rows.length;r++){
     const row = rows[r]||[];
     const name = row[colName];
-    const nameStr = name===undefined ? '' : String(name).trim();
-    if(nameStr==='' || norm(nameStr)==='계') break; // 표 끝(빈 행/합계 행)
+    let nameStr = name===undefined ? '' : String(name).trim();
+    if(norm(nameStr)==='계') break; // 표 끝(합계 행)
+    if(nameStr===''){
+      // 폐지 품의서처럼 데이터 앞에 (수식 오류 등으로) 빈 행이 먼저 나올 수 있으므로,
+      // 아직 현장을 하나도 못 찾았으면 건너뛰고, 이미 찾은 뒤의 빈 행은 표의 끝으로 본다.
+      if(newSites.length || r-dataStart>30) break;
+      continue;
+    }
+    nameStr = nameStr.split(/\r?\n/)[0].trim(); // "(신청인:..)/전화번호" 같은 둘째 줄 이하는 제외
+    let len = Number(row[colLen])||0;
+    let dia = Number(row[colDia])||0;
+    if(len <= 0){ // 배관 연장이 없으면(폐지공사) 포장공사 연장 합계를 점용 길이로 사용
+      const pl = paveLenCols.reduce((s,c)=>s+(Number(row[c])||0), 0);
+      if(pl > 0) len = pl;
+    }
     // 연장이 0인 행은 실제 굴착 현장이 아니라 병합 셀 잔재나 소계용 잡음 행일 가능성이 높으므로
     // 표를 끝냈다고 단정하지 않고(뒤에 진짜 데이터가 더 있을 수 있음) 이 행만 건너뛴다.
-    if((Number(row[colLen])||0) <= 0) continue;
+    if(len <= 0) continue;
+    if(!dia && colDiaOld>=0) dia = Number(row[colDiaOld])||0; // 폐지공사: 기존관 관경 사용
+    const oldAddr = splitAddr
+      ? `${String(row[colOld]||'').trim()} ${String(row[colOld+1]||'').trim()}`.trim()
+      : String(colOld>=0?row[colOld]:'').trim();
     newSites.push({
       name: nameStr,
-      oldAddr: String(colOld>=0?row[colOld]:'').trim(),
+      oldAddr,
       newAddr: String(colNew>=0?row[colNew]:'').trim(),
-      dia: Number(row[colDia])||0,
-      len: Number(row[colLen])||0,
-      pave: String(colPave>=0?row[colPave]:'A.S.P').trim()||'A.S.P',
+      dia,
+      len,
+      pave: String(colPave>=0?row[colPave]:'A.S.P').trim().replace(/^ASP$/i,'A.S.P')||'A.S.P', // 폐지 품의서는 'ASP'로 표기
       due: String(colDue>=0?row[colDue]:'').trim(),
       _src: file.name
     });
@@ -463,6 +487,224 @@ async function extractDrawingImages(zip, drawingPath){
   return pics;
 }
 
+
+/* ---- 그림 위에 얹힌 도형(선·사각형·화살표·글상자) 읽기/그리기 ----
+   엑셀에서 사진 위에 그린 도형은 사진 파일과 별개의 개체(xl/drawings)로 저장된다. 사진만 꺼내면 도형이
+   빠지므로, 도형의 위치·색·굵기·글자를 읽어 해당 사진 위에 다시 그려 한 장의 이미지로 합친다. */
+const SCHEME_RGB = {tx1:'000000',dk1:'000000',bg1:'FFFFFF',lt1:'FFFFFF',tx2:'44546A',dk2:'44546A',bg2:'E7E6E6',lt2:'E7E6E6',
+  accent1:'4472C4',accent2:'ED7D31',accent3:'A5A5A5',accent4:'FFC000',accent5:'5B9BD5',accent6:'70AD47'};
+function xch(el,name){ if(!el) return null; for(let n=el.firstChild;n;n=n.nextSibling){ if(n.nodeType===1 && n.localName===name) return n; } return null; }
+function xchs(el,name){ const out=[]; if(!el) return out; for(let n=el.firstChild;n;n=n.nextSibling){ if(n.nodeType===1 && n.localName===name) out.push(n); } return out; }
+function xdesc(el,name){ if(!el) return null; const l=el.getElementsByTagName('*'); for(let i=0;i<l.length;i++){ if(l[i].localName===name) return l[i]; } return null; }
+function xdescs(el,name){ const out=[]; if(!el) return out; const l=el.getElementsByTagName('*'); for(let i=0;i<l.length;i++){ if(l[i].localName===name) out.push(l[i]); } return out; }
+function xColor(fillEl){ // solidFill 등 색 지정 요소 -> '#RRGGBB' (없으면 null)
+  if(!fillEl) return null;
+  const c = xch(fillEl,'srgbClr'); if(c) return '#'+c.getAttribute('val');
+  const sc = xch(fillEl,'schemeClr'); if(sc){ const v=SCHEME_RGB[sc.getAttribute('val')]; return v?'#'+v:'#000000'; }
+  return null;
+}
+function xXfrm(spPr){
+  const x = xch(spPr,'xfrm'); if(!x) return null;
+  const off=xch(x,'off'), ext=xch(x,'ext'); if(!off||!ext) return null;
+  return {x:+off.getAttribute('x'), y:+off.getAttribute('y'), w:+ext.getAttribute('cx'), h:+ext.getAttribute('cy'),
+          flipH:x.getAttribute('flipH')==='1', flipV:x.getAttribute('flipV')==='1',
+          chX:xch(x,'chOff')?+xch(x,'chOff').getAttribute('x'):0, chY:xch(x,'chOff')?+xch(x,'chOff').getAttribute('y'):0,
+          chW:xch(x,'chExt')?+xch(x,'chExt').getAttribute('cx'):0, chH:xch(x,'chExt')?+xch(x,'chExt').getAttribute('cy'):0};
+}
+// 도형 하나(sp/cxnSp) 해석. tf: 그룹 안에 있을 때 좌표 변환(없으면 null)
+function parseShapeNode(node, tf){
+  const spPr = xch(node,'spPr'); const xf = xXfrm(spPr); if(!xf) return null;
+  let {x,y,w,h} = xf;
+  if(tf){ x = tf.ox + (x-tf.cx)*tf.sx; y = tf.oy + (y-tf.cy)*tf.sy; w = w*tf.sx; h = h*tf.sy; }
+  const isLine = node.localName==='cxnSp' || /line|Connector/i.test((xch(xch(spPr,'prstGeom'),'avLst')?'':'')+((xch(spPr,'prstGeom')||{getAttribute:()=>''}).getAttribute('prst')||''));
+  const prstEl = xch(spPr,'prstGeom'); const prst = prstEl?prstEl.getAttribute('prst'):'rect';
+  const style = xch(node,'style');
+  const cNv = xch(xch(node,'nvSpPr'),'cNvSpPr'); const isTxBox = !!(cNv && cNv.getAttribute('txBox')==='1');
+  // 선
+  let lineColor=null, lineW=9525, head=null, tail=null;
+  const ln = xch(spPr,'ln');
+  if(ln){
+    if(xch(ln,'noFill')) lineColor=null;
+    else { lineColor = xColor(xch(ln,'solidFill')); }
+    if(ln.getAttribute('w')) lineW = +ln.getAttribute('w');
+    const he=xch(ln,'headEnd'), te=xch(ln,'tailEnd');
+    if(he && he.getAttribute('type') && he.getAttribute('type')!=='none') head=he.getAttribute('type');
+    if(te && te.getAttribute('type') && te.getAttribute('type')!=='none') tail=te.getAttribute('type');
+  }
+  if(!lineColor && !(ln && xch(ln,'noFill')) && style){ lineColor = xColor(xch(style,'lnRef')); }
+  // 채우기
+  let fill=null;
+  if(xch(spPr,'noFill')) fill=null;
+  else if(xch(spPr,'solidFill')) fill = xColor(xch(spPr,'solidFill'));
+  else if(style && !isTxBox && !isLine) fill = xColor(xch(style,'fillRef'));
+  // 글자
+  let text='', fontPt=11, fontColor='#000000', bold=false;
+  const tb = xch(node,'txBody');
+  if(tb){
+    const paras = xchs(tb,'p').map(pp=>{
+      const runs = xchs(pp,'r'); let t='';
+      runs.forEach((r,i)=>{ t += (xch(r,'t')?xch(r,'t').textContent:''); if(i===0){
+        const rp=xch(r,'rPr'); if(rp){ if(rp.getAttribute('sz')) fontPt=+rp.getAttribute('sz')/100; if(rp.getAttribute('b')==='1') bold=true;
+          const col=xColor(xch(rp,'solidFill')); if(col) fontColor=col; } } });
+      return t;
+    });
+    text = paras.join('\n').replace(/\s+$/,'');
+  }
+  // 자유형(custGeom) 도형: 첫 path 의 moveTo/lnTo/cubicBezTo/close 를 읽는다 (화살표 선 등)
+  let path=null;
+  const cg = xch(spPr,'custGeom');
+  if(cg){
+    const pl = xch(cg,'pathLst'); const pe = pl ? xch(pl,'path') : null;
+    if(pe){
+      const pw=+pe.getAttribute('w')||xf.w||1, ph=+pe.getAttribute('h')||xf.h||1; const cmds=[];
+      const pts = el=>xchs(el,'pt').map(t=>[+t.getAttribute('x'),+t.getAttribute('y')]);
+      for(let n=pe.firstChild;n;n=n.nextSibling){
+        if(n.nodeType!==1) continue;
+        if(n.localName==='moveTo'||n.localName==='lnTo'||n.localName==='cubicBezTo') cmds.push({c:n.localName,p:pts(n)});
+        else if(n.localName==='close') cmds.push({c:'close',p:[]});
+      }
+      path={pw,ph,cmds};
+      if(!fill && !xch(spPr,'solidFill')) fill=null;
+    }
+  }
+  return {kind:isLine?'line':'shape', prst, path, x,y,w,h, flipH:xf.flipH, flipV:xf.flipV, lineColor, lineW, head, tail, fill, text, fontPt, fontColor, bold};
+}
+function walkDrawingNode(node, tf, shapes){
+  const ln = node.localName;
+  if(ln==='sp' || ln==='cxnSp'){ const sh=parseShapeNode(node,tf); if(sh) shapes.push(sh); }
+  else if(ln==='grpSp'){
+    const xf = xXfrm(xch(node,'grpSpPr')); if(!xf || !xf.chW || !xf.chH) return;
+    let gx=xf.x, gy=xf.y, gw=xf.w, gh=xf.h;
+    if(tf){ gx=tf.ox+(gx-tf.cx)*tf.sx; gy=tf.oy+(gy-tf.cy)*tf.sy; gw*=tf.sx; gh*=tf.sy; }
+    const ntf = {ox:gx, oy:gy, cx:xf.chX, cy:xf.chY, sx:gw/xf.chW, sy:gh/xf.chH};
+    for(let n=node.firstChild;n;n=n.nextSibling){ if(n.nodeType===1) walkDrawingNode(n, ntf, shapes); }
+  }
+}
+// drawing XML 에서 그림(위치·크기·셀 위치)과 도형 목록을 읽는다.
+async function extractDrawingItems(zip, drawingPath){
+  const drawFile = zip.file(drawingPath); if(!drawFile) return {pics:[], shapes:[]};
+  const xml = await drawFile.async('string');
+  const relsPath = drawingPath.replace(/xl\/drawings\/(.+)\.xml$/, 'xl/drawings/_rels/$1.xml.rels');
+  const relsFile = zip.file(relsPath); const relsXml = relsFile ? await relsFile.async('string') : '';
+  const relsMap = {};
+  for(const m of relsXml.matchAll(/<Relationship\b[^>]*\/>/g)){ const id=xmlAttr(m[0],'Id'), t=xmlAttr(m[0],'Target'); if(id&&t) relsMap[id]=t; }
+  const doc = new DOMParser().parseFromString(xml,'application/xml');
+  const pics=[], shapes=[];
+  for(const a of xchs(doc.documentElement,'twoCellAnchor').concat(xchs(doc.documentElement,'oneCellAnchor'), xchs(doc.documentElement,'absoluteAnchor'))){
+    const fromEl = xch(a,'from');
+    const col = fromEl ? +xch(fromEl,'col').textContent : 0, row = fromEl ? +xch(fromEl,'row').textContent : 0;
+    for(let n=a.firstChild;n;n=n.nextSibling){
+      if(n.nodeType!==1) continue;
+      if(n.localName==='pic'){
+        const blip = xdesc(n,'blip'); const rid = blip ? (blip.getAttribute('r:embed')) : null;
+        const xf = xXfrm(xch(n,'spPr')); const target = rid ? relsMap[rid] : null;
+        if(!target || !xf) continue;
+        pics.push({col, row, mediaPath: resolveRelTarget(drawingPath, target), x:xf.x, y:xf.y, w:xf.w, h:xf.h});
+      } else walkDrawingNode(n, null, shapes);
+    }
+  }
+  return {pics, shapes};
+}
+function loadImg(src){ return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error('이미지 로드 실패')); im.src=src; }); }
+function drawArrowHead(g, x1,y1, x2,y2, size){ // (x1,y1)->(x2,y2) 방향, 끝점 (x2,y2)에 화살촉
+  const ang = Math.atan2(y2-y1, x2-x1);
+  g.beginPath(); g.moveTo(x2,y2);
+  g.lineTo(x2-size*Math.cos(ang-Math.PI/7), y2-size*Math.sin(ang-Math.PI/7));
+  g.lineTo(x2-size*Math.cos(ang+Math.PI/7), y2-size*Math.sin(ang+Math.PI/7));
+  g.closePath(); g.fill();
+}
+function drawOneShape(g, s, pic, kx, ky){
+  const X=(s.x-pic.x)*kx, Y=(s.y-pic.y)*ky, W=s.w*kx, H=s.h*ky;
+  const lw = Math.max(1, s.lineW*Math.min(kx,ky));
+  g.save(); g.lineWidth = lw; g.lineJoin='miter';
+  if(s.kind==='line'){
+    if(!s.lineColor){ g.restore(); return; }
+    let x1=X, y1=Y, x2=X+W, y2=Y+H; if(s.flipH){ x1=X+W; x2=X; } if(s.flipV){ y1=Y+H; y2=Y; }
+    g.strokeStyle=s.lineColor; g.fillStyle=s.lineColor;
+    g.beginPath(); g.moveTo(x1,y1); g.lineTo(x2,y2); g.stroke();
+    const hs = Math.max(6*lw, 10);
+    if(s.tail) drawArrowHead(g,x1,y1,x2,y2,hs);
+    if(s.head) drawArrowHead(g,x2,y2,x1,y1,hs);
+    g.restore(); return;
+  }
+  if(s.path){ // 자유형 도형(열린 선이면 선+화살촉, 닫힌 도형이면 채우기/테두리)
+    const sx=W/s.path.pw, sy=H/s.path.ph; const P=pt=>[X+pt[0]*sx, Y+pt[1]*sy];
+    let last=null, prev=null, closed=false;
+    g.beginPath();
+    s.path.cmds.forEach(cm=>{
+      if(cm.c==='moveTo'){ const a=P(cm.p[0]); g.moveTo(a[0],a[1]); last=a; }
+      else if(cm.c==='lnTo'){ const a=P(cm.p[0]); prev=last; g.lineTo(a[0],a[1]); last=a; }
+      else if(cm.c==='cubicBezTo'){ const a=P(cm.p[0]),b=P(cm.p[1]),c=P(cm.p[2]); prev=b; g.bezierCurveTo(a[0],a[1],b[0],b[1],c[0],c[1]); last=c; }
+      else if(cm.c==='close'){ g.closePath(); closed=true; }
+    });
+    if(closed && s.fill){ g.fillStyle=s.fill; g.fill(); }
+    if(s.lineColor){
+      g.strokeStyle=s.lineColor; g.fillStyle=s.lineColor; g.stroke();
+      if(!closed && last && prev){ const hs=Math.max(6*lw,10);
+        if(s.tail) drawArrowHead(g,prev[0],prev[1],last[0],last[1],hs);
+        if(s.head){ const f=P(s.path.cmds[0].p[0]); const n2=P((s.path.cmds[1]||s.path.cmds[0]).p[0]); drawArrowHead(g,n2[0],n2[1],f[0],f[1],hs); } }
+    }
+    g.restore(); return;
+  }
+  const path = ()=>{ g.beginPath();
+    if(s.prst==='ellipse') g.ellipse(X+W/2,Y+H/2,Math.abs(W/2),Math.abs(H/2),0,0,Math.PI*2);
+    else if(s.prst==='roundRect'){ const r=Math.min(W,H)*0.16; g.moveTo(X+r,Y); g.arcTo(X+W,Y,X+W,Y+H,r); g.arcTo(X+W,Y+H,X,Y+H,r); g.arcTo(X,Y+H,X,Y,r); g.arcTo(X,Y,X+W,Y,r); g.closePath(); }
+    else g.rect(X,Y,W,H); };
+  if(s.fill){ g.fillStyle=s.fill; path(); g.fill(); }
+  if(s.lineColor){ g.strokeStyle=s.lineColor; path(); g.stroke(); }
+  if(s.text){
+    const px = Math.max(8, s.fontPt*12700*Math.min(kx,ky));
+    g.fillStyle=s.fontColor; g.font=`${s.bold?'bold ':''}${px}px "Malgun Gothic","Noto Sans CJK KR",sans-serif`;
+    g.textAlign='center'; g.textBaseline='middle';
+    const lines=s.text.split('\n'); const lh=px*1.25; const y0=Y+H/2-(lines.length-1)*lh/2;
+    lines.forEach((t,i)=>g.fillText(t, X+W/2, y0+i*lh));
+  }
+  g.restore();
+}
+// 사진(dataUrl) 위에 그 사진 영역 안에 있는 도형들을 그려 새 dataUrl 로 돌려준다(도형이 없으면 원본 그대로).
+async function composeWithShapes(dataUrl, pic, shapes){
+  const mine = shapes.filter(s=>{ const cx=s.x+s.w/2, cy=s.y+s.h/2; return cx>=pic.x && cx<=pic.x+pic.w && cy>=pic.y && cy<=pic.y+pic.h; });
+  if(!mine.length) return dataUrl;
+  const img = await loadImg(dataUrl);
+  const W = img.naturalWidth||img.width, H = img.naturalHeight||img.height;
+  const c = document.createElement('canvas'); c.width=W; c.height=H;
+  const g = c.getContext('2d'); g.drawImage(img,0,0);
+  const kx=W/pic.w, ky=H/pic.h;
+  mine.forEach(s=>drawOneShape(g,s,pic,kx,ky));
+  return c.toDataURL('image/jpeg',0.92);
+}
+async function picDataUrl(zip, pic, shapes){
+  const f = zip.file(pic.mediaPath); if(!f) return null;
+  const url = 'data:'+mimeFor(pic.mediaPath)+';base64,'+await f.async('base64');
+  try{ return await composeWithShapes(url, pic, shapes); }catch(e){ return url; }
+}
+// 폐지공사 시트처럼 "GIS 위치도 | ISO" / "입상관 사진" 으로 구성된 위치도 시트 해석
+async function extractLayoutSheet(zip, path, ws, sheetName, authority){
+  const drawPath = await buildSheetDrawingPath(zip, path); if(!drawPath) return null;
+  const {pics, shapes} = await extractDrawingItems(zip, drawPath);
+  if(pics.length < 2) return null;
+  // "입상관 사진"(또는 "현장사진") 제목이 있는 행 이후의 그림 = 현장사진, 그 이전 = 위치도류
+  let r0 = -1;
+  Object.keys(ws).forEach(k=>{ const m=k.match(/^A(\d+)$/); if(m && ws[k] && /입상관|현장사진/.test(String(ws[k].v||''))) r0 = r0<0 ? +m[1]-1 : Math.min(r0,+m[1]-1); });
+  if(r0 < 0){ const mx = Math.max(...pics.map(p=>p.row)); r0 = Math.floor(mx/2); }
+  const locPics = pics.filter(p=>p.row < r0).sort((a,b)=>a.col-b.col);
+  const phoPics = pics.filter(p=>p.row >= r0).sort((a,b)=>a.col-b.col);
+  if(!locPics.length && !phoPics.length) return null;
+  // 기존 사진대지 양식(위 칸 1장 / 아래 칸 1장)에 맞춘다:
+  //  - 위 칸(위치 현황도) = 위쪽 그림 중 맨 왼쪽 = GIS 위치도 (ISO 는 사용하지 않음)
+  //  - 아래 칸(현장사진) = 입상관 사진이 2장이면 왼쪽 사진만 사용
+  const locImgs=[], photoImgs=[];
+  if(locPics[0]){ const u=await picDataUrl(zip,locPics[0],shapes); if(u) locImgs.push({src:u,label:''}); }
+  if(phoPics[0]){ const u=await picDataUrl(zip,phoPics[0],shapes); if(u) photoImgs.push({src:u,label:''}); }
+  // 이름/주소: 시트명("폐지_화룡동 김형열주택") + A2("주소 : 영천시 화룡동 291-1번지 (장수로 36)")
+  const name = sheetName.replace(/^\s*(폐지|\d+)\s*[._-]\s*/,'').trim();
+  const a2 = ws['A2'] ? String(ws['A2'].v) : '';
+  const full = a2.replace(/^\s*주소\s*[:：]\s*/,'').trim();
+  const am = full.match(/([가-힣0-9]+(?:동|리|읍|면))\s*(산?\d+(?:-\d+)?)/);
+  const oldAddr = am ? `${am[1]} ${am[2]}` : '';
+  return { sheetName, name, oldAddr, title: name, loc: full || `${authority} ${oldAddr}`, img1: locImgs[0]?locImgs[0].src:null, img2: photoImgs[0]?photoImgs[0].src:null, locImgs, photoImgs };
+}
+
 async function extractPhotoSites(buf, wb){
   const zip = await JSZip.loadAsync(buf);
   const resolve = await buildImageResolver(zip); // null이면 셀삽입(richData) 방식이 아닌 워크북 - 아래에서 drawing 방식으로 폴백
@@ -477,6 +719,16 @@ async function extractPhotoSites(buf, wb){
     const zf = path ? zip.file(path) : null;
     if(!zf) continue;
     const sheetXml = await zf.async('string');
+    const wsx = wb.Sheets[sheetName];
+
+    // 폐지공사처럼 "현장 위치도 / GIS 위치도 | ISO / 입상관 사진" 구성의 시트는 전용 해석을 먼저 시도
+    const a1txt = norm(wsx && wsx['A1'] ? String(wsx['A1'].v) : '');
+    if(a1txt.includes('현장위치도') || /^폐지/.test(norm(sheetName))){
+      try{
+        const lay = await extractLayoutSheet(zip, path, wsx, sheetName, authority);
+        if(lay){ out.push(lay); continue; }
+      }catch(e){ /* 전용 해석 실패 시 아래 일반 방식으로 계속 */ }
+    }
 
     let img1=null, img2=null;
     if(resolve){
@@ -489,9 +741,11 @@ async function extractPhotoSites(buf, wb){
       // 셀삽입 이미지가 없으면 전통적인 그림(drawing) 방식으로 폴백 시도
       const drawPath = await buildSheetDrawingPath(zip, path);
       if(drawPath){
-        const pics = await extractDrawingImages(zip, drawPath);
-        if(pics[0]){ const f=zip.file(pics[0].mediaPath); if(f) img1 = 'data:'+mimeFor(pics[0].mediaPath)+';base64,'+await f.async('base64'); }
-        if(pics[1]){ const f=zip.file(pics[1].mediaPath); if(f) img2 = 'data:'+mimeFor(pics[1].mediaPath)+';base64,'+await f.async('base64'); }
+        const items = await extractDrawingItems(zip, drawPath);
+        const pics = items.pics.slice().sort((a,b)=>a.col-b.col); // 왼쪽(위치 현황도) -> 오른쪽(현장사진)
+        // 사진 위에 그려 둔 선·사각형·화살표·글상자도 함께 합성해서 가져온다
+        if(pics[0]) img1 = await picDataUrl(zip, pics[0], items.shapes);
+        if(pics[1]) img2 = await picDataUrl(zip, pics[1], items.shapes);
       }
     }
     if(!img1 && !img2) continue; // 위치도가 없는 시트(요약/기타)는 건너뜀
@@ -817,7 +1071,7 @@ function renderPhotoTable(){
   const authority = $('authority').value.trim()||'영천시';
   $('photoInfo').textContent = photoSites.length
     ? `${photoSites.length}개 수요처의 위치도 시트에서 사진을 읽었습니다.`
-    : '수요처별 위치도 시트를 찾지 못했습니다. (사진대지 생성을 사용하려면 원본 파일에 "N.동이름 수요처명" 형태의 개별 시트가 있어야 합니다)';
+    : '수요처별 위치도 시트를 찾지 못했습니다. (사진대지 생성을 사용하려면 원본 파일에 "N.동이름 수요처명" 또는 "폐지_동이름 수요처명" 형태의 개별 시트가 있어야 합니다)';
   if(!photoSites.length){ $('photoTableWrap').innerHTML=''; return; }
   let html = '<table class="photo"><thead><tr><th style="width:32%;">제목(수요처명)</th><th style="width:34%;">위치</th><th style="width:18%;">사진1 · 사진2</th><th style="width:16%;"></th></tr></thead><tbody>';
   photoSites.forEach((p,i)=>{
@@ -825,8 +1079,8 @@ function renderPhotoTable(){
       <td><input data-i="${i}" data-k="title" value="${(p.title||'').replace(/"/g,'&quot;')}"></td>
       <td><input data-i="${i}" data-k="loc" value="${(p.loc||'').replace(/"/g,'&quot;')}"></td>
       <td><div class="thumbs">
-        ${p.img1?`<img src="${p.img1}">`:'<div class="none">위치도<br>없음</div>'}
-        ${p.img2?`<img src="${p.img2}">`:'<div class="none">현장사진<br>없음</div>'}
+        ${locList(p).length?locList(p).map(x=>`<img src="${x.src}">`).join(''):'<div class="none">위치도<br>없음</div>'}
+        ${photoList(p).length?photoList(p).map(x=>`<img src="${x.src}">`).join(''):'<div class="none">현장사진<br>없음</div>'}
       </div></td>
       <td><button class="btn secondary small" data-pdf="${i}">PDF 저장</button></td>
     </tr>`;
@@ -841,18 +1095,28 @@ function renderPhotoTable(){
   });
 }
 
+// 위치도/현장사진 이미지 목록 (폐지 시트처럼 여러 장이면 locImgs/photoImgs, 일반 시트는 img1/img2 한 장씩)
+function locList(p){ return p.locImgs ? p.locImgs : (p.img1 ? [{src:p.img1,label:''}] : []); }
+function photoList(p){ return p.photoImgs ? p.photoImgs : (p.img2 ? [{src:p.img2,label:''}] : []); }
+
 function buildPhotoHtml(p){
-  const imgCell = (src,label) => src
-    ? `<img src="${src}" style="max-width:100%;max-height:320px;display:block;margin:0 auto;">`
-    : `<span style="color:#999;">[${label} 없음]</span>`;
+  // 한 장이면 가운데 크게, 여러 장이면 가로로 나란히(각각 라벨이 있으면 아래에 표기)
+  const imgCell = (list,label) => {
+    if(!list.length) return `<span style="color:#999;">[${label} 없음]</span>`;
+    if(list.length===1) return `<img src="${list[0].src}" style="max-width:100%;max-height:320px;display:block;margin:0 auto;">`;
+    const w = Math.floor(100/list.length)-2;
+    return `<table style="width:100%;border-collapse:collapse;"><tr>`+
+      list.map(x=>`<td style="width:${w}%;text-align:center;vertical-align:middle;padding:0 4px;"><img src="${x.src}" style="max-width:100%;max-height:310px;display:block;margin:0 auto;">${x.label?`<div style="font-size:11.5px;margin-top:4px;">${x.label}</div>`:''}</td>`).join('')+
+      `</tr></table>`;
+  };
   return `<div style="width:720px;background:#fff;padding:26px 30px;font-family:'Malgun Gothic',sans-serif;color:#111;">
     <div style="font-size:15px;font-weight:700;">○ ${p.title||''}</div>
     <div style="font-size:12.5px;margin:8px 0 14px 18px;">${p.loc||''}</div>
     <table style="border-collapse:collapse;width:100%;">
       <tr><td style="border:1px solid #333;padding:6px;text-align:center;font-weight:700;font-size:12.5px;background:#f5f4f1;">위치 현황도</td></tr>
-      <tr><td style="border:1px solid #333;height:340px;text-align:center;vertical-align:middle;padding:10px;">${imgCell(p.img1,'사진1')}</td></tr>
+      <tr><td style="border:1px solid #333;height:340px;text-align:center;vertical-align:middle;padding:10px;">${imgCell(locList(p),'위치도')}</td></tr>
       <tr><td style="border:1px solid #333;padding:6px;text-align:center;font-weight:700;font-size:12.5px;background:#f5f4f1;">현장사진</td></tr>
-      <tr><td style="border:1px solid #333;height:340px;text-align:center;vertical-align:middle;padding:10px;">${imgCell(p.img2,'사진2')}</td></tr>
+      <tr><td style="border:1px solid #333;height:340px;text-align:center;vertical-align:middle;padding:10px;">${imgCell(photoList(p),'현장사진')}</td></tr>
     </table>
   </div>`;
 }

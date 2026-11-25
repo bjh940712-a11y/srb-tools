@@ -350,6 +350,27 @@
     return { foot: best.foot, dir: V.norm(dir), pipeDir: best.dir, dist: best.dist };
   }
 
+  /** 폐지용 분기점 찾기: 클릭 근처에 본관에서 갈라지는 인입관(끝점이 다른 배관 위에 있는 선)이 있으면
+   *  그 갈라지는 점을 분기점으로, 본관 방향·인입관 쪽을 건물 쪽으로 잡음. 없으면 일반 snapTee */
+  function snapAbandon(gis, pipeLayer, click) {
+    const P = gis.polys.filter(p => p.layer === pipeLayer && !p.frame);
+    let best = null;
+    P.forEach(sv => {
+      const pts = sv.closed ? sv.pts.concat([sv.pts[0]]) : sv.pts;
+      const near = nearestOnPoly(pts, click); if (near.dist > 3) return;
+      [[pts[0], pts[1]], [pts[pts.length - 1], pts[pts.length - 2]]].forEach(([e, e2]) => {
+        let m = null;
+        P.forEach(mp => { if (mp === sv) return; const r = nearestOnPoly(mp.closed ? mp.pts.concat([mp.pts[0]]) : mp.pts, e); if (r.dist < 0.6 && (!m || r.dist < m.dist)) m = r; });
+        if (!m) return;
+        const sd = V.norm(V.sub(e2, e)), n = V.perp(m.dir), dir = V.dot(sd, n) >= 0 ? n : V.mul(n, -1);
+        if (Math.abs(V.dot(sd, n)) < 0.5) return;                  // 본관과 거의 나란한 선은 인입관이 아님
+        const sc = near.dist + V.len(V.sub(e, click)) * 0.3;
+        if (!best || sc < best.sc) best = { sc, foot: m.foot, dir, pipeDir: m.dir, dist: V.len(V.sub(m.foot, click)) };
+      });
+    });
+    return best ? { foot: best.foot, dir: best.dir, pipeDir: best.pipeDir, dist: best.dist } : snapTee(gis, pipeLayer, click);
+  }
+
   /* ------------------------------------------------------- 품의 엑셀 읽기 */
   /** SheetJS workbook → 작업발주서 행 목록 */
   function readOrderSheet(XLSX, wb) {
@@ -402,6 +423,29 @@
       rows.push(row);
     }
     return { sheet: name, rows };
+  }
+  /** 폐지: 분기점에서 건물 쪽으로 갈라지는 기존 인입관을 수치지도 배관에서 찾음 → {pts(분기점부터), src(원래 폴리선)} */
+  function findService(gis, pipeLayer, foot, dir) {
+    const len = P => P.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - P[i][0], q[1] - P[i][1]), 0);
+    let best = null;
+    gis.polys.forEach(p => {
+      if (p.frame || p.layer !== pipeLayer) return;
+      const P = p.closed ? p.pts.concat([p.pts[0]]) : p.pts;
+      let nb = null;
+      for (let i = 0; i + 1 < P.length; i++) {
+        const a = P[i], b = P[i + 1], d = [b[0] - a[0], b[1] - a[1]], L2 = d[0] * d[0] + d[1] * d[1] || 1e-12;
+        const t = Math.max(0, Math.min(1, ((foot[0] - a[0]) * d[0] + (foot[1] - a[1]) * d[1]) / L2)), q = [a[0] + d[0] * t, a[1] + d[1] * t];
+        const dd = Math.hypot(q[0] - foot[0], q[1] - foot[1]); if (!nb || dd < nb.d) nb = { d: dd, i, q };
+      }
+      if (!nb || nb.d > 1.5) return;
+      [[nb.q].concat(P.slice(nb.i + 1)), [nb.q].concat(P.slice(0, nb.i + 1).reverse())].forEach(br => {
+        const bl = len(br); if (bl < 0.5) return;
+        let k = 1; while (k < br.length - 1 && Math.hypot(br[k][0] - br[0][0], br[k][1] - br[0][1]) < 0.3) k++;
+        const v = [br[k][0] - br[0][0], br[k][1] - br[0][1]], vl = Math.hypot(v[0], v[1]) || 1, sc = (v[0] * dir[0] + v[1] * dir[1]) / vl;
+        if (sc > 0.6 && (!best || sc > best.sc + 0.05 || (Math.abs(sc - best.sc) <= 0.05 && nb.d < best.d))) best = { sc, d: nb.d, pts: [foot].concat(br.slice(1)), src: p, len: bl };
+      });
+    });
+    return best;
   }
   /** 분기점 근처 수치지도 배관 주기(예: PE160-LP22)에서 본관 재질·관경 추정 */
   function guessMainPipe(gis, foot) {
@@ -492,7 +536,7 @@
     const REM = ABAN ? (+c.removeLen > 0 ? +c.removeLen : 1.0) : 0;
     const segs0 = c.segs.filter(s => s.len > 0);
     const segs = ABAN && !segs0.length ? [{ type: 'ASP', len: REM }] : segs0;
-    const L = ABAN ? Math.max(+c.existLen || 0, REM, segs.reduce((s, x) => s + x.len, 0)) : segs.reduce((s, x) => s + x.len, 0);
+    let L = ABAN ? Math.max(+c.existLen || 0, REM, segs.reduce((s, x) => s + x.len, 0)) : segs.reduce((s, x) => s + x.len, 0);
     const cum = []; let acc = 0; segs.forEach(s => { cum.push([acc, acc + s.len]); acc += s.len; });
     const MD = c.mainDia, ND = ABAN ? c.svcDia : c.newDia;
     const SMAT = ABAN ? (String(c.svcMat || 'PE').toUpperCase().includes('PLP') ? 'PLP' : 'PE') : 'PE';
@@ -531,6 +575,17 @@
       }
       return { p: pts[0], t: [1, 0], leg: 0 };
     };
+    // 폐지: 기존 인입관(수치지도에 있으면 그 선, 없으면 그린 경로/직선)과 CAP 위치 = 인입관 끝(부지경계)에서 철거 연장만큼 분기점 쪽
+    let SVC = null;
+    if (ABAN) {
+      const g = findService(c.gis, c.pipeLayer, tee, dir);
+      SVC = g ? { pts: g.pts, src: g.src } : { pts: routeW || [tee, V.add(tee, V.mul(dir, Math.max(+c.existLen || 0, REM + 0.5)))], src: null };
+      SVC.len = routeLen(SVC.pts);
+      if (!(+c.existLen > 0)) L = Math.max(SVC.len, REM);
+      SVC.sC = Math.max(0.3, SVC.len - REM);
+      const cc_ = atLen(SVC.pts, SVC.sC); SVC.C = cc_.p; SVC.tC = cc_.t; SVC.B = SVC.pts[SVC.pts.length - 1];
+      if (g) routeW = SVC.pts.length >= 2 ? SVC.pts : routeW;
+    }
     let PC;
     if (routeW) {
       let a = Infinity, b = Infinity, cc = -Infinity, d = -Infinity;
@@ -552,12 +607,10 @@
     const tp = W2P(tee);
     const routeEndW = routeW ? routeW[routeW.length - 1] : V.add(tee, V.mul(dir, L));
     const endDirW = routeW ? V.norm(V.sub(routeEndW, routeW[routeW.length - 2])) : dir;
-    poly(routeW ? routeW.map(W2P) : [tp, W2P(routeEndW)], ABAN ? { c: 5, lw: 35, layer: '도면층3' } : { c: 6, lw: 50, layer: '도면층3' });
-    const cutW = routeW ? atLen(routeW, Math.min(REM, routeLen(routeW))) : { p: V.add(tee, V.mul(dir, REM)), t: dir };
-    if (ABAN) {   // 철거 구간(분기점~절단점) 강조 + 절단 표시
-      const rw = routeW || [tee, routeEndW], pts = [tee];
-      let acc_ = 0; for (let i = 0; i + 1 < rw.length; i++) { const l = V.len(V.sub(rw[i + 1], rw[i])); if (acc_ + l >= REM) break; pts.push(rw[i + 1]); acc_ += l; }
-      pts.push(cutW.p); poly(pts.map(W2P), { c: 6, lw: 50, layer: '도면층3' });
+    if (!ABAN) poly(routeW ? routeW.map(W2P) : [tp, W2P(routeEndW)], { c: 6, lw: 50, layer: '도면층3' });
+    else if (!SVC.src) poly(SVC.pts.map(W2P), { c: 5, lw: 35, layer: '도면층3' });      // 수치지도에 없는 기존 인입관만 직접 그림
+    const cutW = ABAN ? { p: SVC.C, t: SVC.tC } : (routeW ? atLen(routeW, Math.min(REM, routeLen(routeW))) : { p: V.add(tee, V.mul(dir, REM)), t: dir });
+    if (ABAN) {   // 절단(CAP) 위치 표시
       const cp = W2P(cutW.p), n_ = V.perp(cutW.t);
       line(V.add(cp, V.mul(n_, 1.6)), V.sub(cp, V.mul(n_, 1.6)), { c: 1, lw: 50 });
     }
@@ -660,14 +713,8 @@
     const AB = w => { const v = V.sub(w, tee); return [V.dot(v, dir), V.dot(v, pd) * sg]; };   // 현장 좌표 → (직각, 평행) 성분[m]
     // 인입 경로: 상세도에서는 항상 직각으로 정리 (각 구간을 배관과 직각/평행 중 큰 성분으로)
     let routeWorld = routeW || [tee, V.add(tee, V.mul(dir, L))];
-    // 폐지: 상세도에는 분기점에서 철거 연장(REM)만큼만 그리고 끝을 CAP(ㄷ)으로 마감 (그 너머 기존관은 그리지 않음)
-    if (ABAN) { const out = [routeWorld[0]]; let acc_ = 0;
-      for (let i = 0; i + 1 < routeWorld.length; i++) { const l = V.len(V.sub(routeWorld[i + 1], routeWorld[i]));
-        if (acc_ + l >= REM) { out.push(V.add(routeWorld[i], V.mul(V.norm(V.sub(routeWorld[i + 1], routeWorld[i])), REM - acc_))); break; }
-        out.push(routeWorld[i + 1]); acc_ += l; }
-      if (out.length < 2) out.push(V.add(tee, V.mul(dir, REM)));
-      routeWorld = out; }
-    const LD = ABAN ? REM : L;                                          // 상세도 경로 길이
+    if (ABAN) routeWorld = SVC.pts;                                    // 폐지: 기존 인입관 전체(분기점~부지경계)
+    const LD = ABAN ? SVC.len : L;                                      // 상세도 경로 길이
     const abPts = [[0, 0]];
     routeWorld.slice(1).forEach((q, i) => {
       const [a1, b1] = AB(q), [a0, b0] = AB(routeWorld[i]); let da = a1 - a0, db = b1 - b0;
@@ -741,9 +788,14 @@
     const frHits = [-3, 0, 3].map(b_ => rayHit(W_(0, b_), dir)).filter(Number.isFinite).sort((x, y) => x - y);
     const aFr = frHits.length ? frHits[Math.floor((frHits.length - 1) / 2)] : null;   // 건물 쪽 첫 수치지도 선
     const bbPts = abPts.slice();
+    if (ABAN) {   // 폐지: 기존 인입관과 그 둘레(글자 자리)만 맞춰 크게 보이게 — 주변 건물·도로는 상세도 끝까지 이어서 그려짐
+      const ea = Math.max(...abPts.map(q => q[0])), bs = abPts.map(q => q[1]);
+      bbPts.push([-1.2, Math.min(...bs) - 1.2], [ea + 1.2, Math.max(...bs) + 1.2], [ea + 1.2, Math.min(...bs) - 1.2], [-1.2, Math.max(...bs) + 1.2]);
+    } else {
     bbPts.push([aF, Pb + sAway * 6], [aF + 6, Pb + sAway * 5]);
     if (aOpp !== null && (c.detailStyle === 'simple' || aOpp > -8)) bbPts.push([aOpp - 1, Pb], [aOpp - 1, Pb + sAway * 6]);   // 수치지도 모드: 먼 반대편은 축척에서 제외(치수는 테두리에서 끊음)
     if (bN !== null) bbPts.push([aF, bN + sN * 3], [aF + 6, bN + sN * 3]);
+    }
     // S=NONE 상세도: 직각 방향 간격은 글자가 들어가도록 최소 폭을 보장 (구간별 늘림)
     const GISD = c.detailStyle !== 'simple';                           // 상세도 지형: 기본=수치지도 그대로(실축척), 'simple'=단순 경계선
     const lv = [0, aF].concat(aOpp !== null ? [aOpp] : []).concat(abPts.map(q => q[0])).sort((x, y) => x - y).filter((v, i, arr) => i === 0 || v - arr[i - 1] > 0.05);
@@ -756,7 +808,7 @@
         return ys[ys.length - 1] - y0 + (a_ - lv[lv.length - 1]) * kk;
       };
     };
-    const KMAX = c.detailStyle === 'simple' ? 14 : 18;
+    const KMAX = c.detailStyle === 'simple' ? 14 : (ABAN ? 28 : 18);          // 폐지는 인입관이 짧아 더 크게
     let k = KMAX, fa = mkFa(k), mnx, mny, mxx, mxy;
     for (let it = 0; it < 5; it++) {
       mnx = Infinity; mny = Infinity; mxx = -Infinity; mxy = -Infinity;
@@ -776,7 +828,15 @@
     c.gis.polys.forEach(p => {
       if (p.frame) return;
       const pts = (p.closed ? p.pts.concat([p.pts[0]]) : p.pts).map(TW);
-      if (p.layer === c.pipeLayer) dpl(pts, { c: 5, lw: 35 });
+      if (p.layer === c.pipeLayer) {
+        if (ABAN && SVC.src === p) {   // 철거 구간(CAP 위치~부지경계)은 기존관에서 지움
+          const P_ = p.closed ? p.pts.concat([p.pts[0]]) : p.pts, sP = q => { let acc_ = 0, bst = null; for (let i = 0; i + 1 < P_.length; i++) { const nr = nearestOnPoly([P_[i], P_[i + 1]], q); if (!bst || nr.dist < bst.d) bst = { d: nr.dist, s: acc_ + V.len(V.sub(nr.foot, P_[i])) }; acc_ += V.len(V.sub(P_[i + 1], P_[i])); } return bst.s; };
+          const s1 = sP(SVC.C), s2 = sP(SVC.B), lo = Math.min(s1, s2), hi = Math.max(s1, s2), tot = routeLen(P_);
+          const sub = (x0, x1) => { const o = [atLen(P_, x0).p]; let acc_ = 0; for (let i = 0; i + 1 < P_.length; i++) { acc_ += V.len(V.sub(P_[i + 1], P_[i])); if (acc_ > x0 && acc_ < x1) o.push(P_[i + 1]); } o.push(atLen(P_, x1).p); return o; };
+          if (lo > 0.01) dpl(sub(0, lo).map(TW), { c: 5, lw: 35 });
+          if (tot - hi > 0.01) dpl(sub(hi, tot).map(TW), { c: 5, lw: 35 });
+        } else dpl(pts, { c: 5, lw: 35 });
+      }
       else if (GISD) dpl(pts, { c: p.pts === target ? 1 : (nb && p.pts === nb.pts ? 7 : 8), lw: p.pts === target ? 30 : (nb && p.pts === nb.pts ? 18 : 13) });
     });
     translatePrims(S.tee, O);
@@ -836,8 +896,8 @@
     // 인입관 (분기 T 끝에서 출발)
     const J = V.add(O, S.J_rel), Jd = V.sub(J, O);
     let DP = abPts.map(([a_, b_]) => V.add(TA(a_, b_), Jd));
-    if (ABAN) { const l0 = DP.slice(1).reduce((a_, q, i) => a_ + V.len(V.sub(q, DP[i])), 0), f = Math.max(1, 32 / Math.max(l0, 1e-6)); DP = DP.map(q => V.add(J, V.mul(V.sub(q, J), f))); }   // S=NONE: 짧은 철거 구간은 보이게 늘림
-    if (target && c.detailStyle !== 'simple') {   // 수요처 건물(빨간 외곽선)을 넘어서는 배관은 그리지 않음: 처음 닿는 곳에서 끊음
+    if (ABAN) DP = SVC.pts.map(TW);                                    // 폐지: 기존 인입관 실제 위치 그대로 (새로 그리지 않음)
+    if (!ABAN && target && c.detailStyle !== 'simple') {   // 수요처 건물(빨간 외곽선)을 넘어서는 배관은 그리지 않음: 처음 닿는 곳에서 끊음
       const TP = target.concat([target[0]]).map(TW);
       let acc_ = 0, best = null;
       for (let i = 0; i + 1 < DP.length; i++) {
@@ -885,7 +945,12 @@
     if (!GISD && bN !== null) { const H_ = sN > 0 ? frontB.R : frontB.L; if (H_.Kb !== undefined && (H_.Kb - bN) * sN < 0) dpl(densify([[aF, bN], [aF, bN + sN * 80]]).map(([a_, b_]) => TJ(a_, b_)), { c: 1, lw: 30 }); }
     if (!GISD) if (bN !== null) dpl([TJ(aF, bN), TJ(aF + 500, bN)], { c: 1, lw: 30 });
     if (oppB && !GISD) dpl(densify(oppB.pts).map(([a_, b_]) => TA(a_, b_)), { c: 1, lw: 30 });     // 도로 반대편 경계
-    poly(DP, { c: 6, lw: 50 });
+    if (!ABAN) poly(DP, { c: 6, lw: 50 });
+    else {
+      const sub = (x0, x1) => { const o = [atLen(SVC.pts, x0).p]; let acc_ = 0; for (let i = 0; i + 1 < SVC.pts.length; i++) { acc_ += V.len(V.sub(SVC.pts[i + 1], SVC.pts[i])); if (acc_ > x0 && acc_ < x1) o.push(SVC.pts[i + 1]); } o.push(atLen(SVC.pts, x1).p); return o; };
+      if (!SVC.src) dpl(sub(0, SVC.sC).map(TW), { c: 5, lw: 35 });                      // 수치지도에 없는 기존 인입관
+      dpl(sub(SVC.sC, SVC.len).map(TW), { c: 6, lt: 'HIDDEN', lts: 0.3 });               // 철거 구간: 가는 점선
+    }
     addObst(DP, 40);                                                    // 글자가 인입관을 가로지르는 건 반대쪽으로 넘기는 것보다 나쁨
     c.gis.polys.forEach(p => { if (!p.frame && p.layer === c.pipeLayer) clipPoly((p.closed ? p.pts.concat([p.pts[0]]) : p.pts).map(TW), RD).forEach(s_ => addObst(s_, 6)); });
     if (GISD) {
@@ -896,7 +961,7 @@
     const drawLen = DP.slice(1).reduce((a_, q, i) => a_ + V.len(V.sub(q, DP[i])), 0);
     const at = s_ => atLen(DP, Math.max(0, Math.min(LD, s_)) / LD * drawLen);   // 발주서 연장 s[m] → 도면 경로 위치
     if (ABAN) {   // 철거 구간 끝 CAP 마감: 'ㄷ'자(배관 쪽으로 열림)
-      const E_ = DP[DP.length - 1], t_ = V.norm(V.sub(E_, DP[DP.length - 2])), n_ = V.perp(t_), hh = 2.1, ww = 1.6, E2 = V.add(E_, V.mul(t_, 0.5));
+      const E_ = TW(SVC.C), t_ = V.norm(V.sub(TW(V.add(SVC.C, SVC.tC)), E_)), n_ = V.perp(t_), hh = 2.1, ww = 1.6, E2 = E_;
       poly([V.add(E2, V.mul(n_, hh)), V.add(V.add(E2, V.mul(n_, hh)), V.mul(t_, ww)), V.add(V.sub(E2, V.mul(n_, hh)), V.mul(t_, ww)), V.sub(E2, V.mul(n_, hh))], { c: 6, lw: 50 });
       addObst([V.add(E2, V.mul(n_, hh)), V.sub(E2, V.mul(n_, hh))], 40);
     }
@@ -940,7 +1005,7 @@
     const peSide = fs[bldSide] <= fs[-bldSide] + 0.5 ? bldSide : -bldSide;
     place(peTxt, 2.07, sideCands(spread(legS0, legS1), 2.07, peSide).concat(sideCands(spread(legS0, legS1), 2.07, -peSide, 30)), { c: ABAN ? 5 : 6 });
     if (ABAN) {
-      const from0 = spread(0, LD);
+      const from0 = spread(SVC.sC, LD).concat(spread(0, LD));
       place(`S:${fmt1(REM)}M D:${fmt1(D_NEW)}M`, 2.07, sideCands(from0, 2.07, -peSide).concat(sideCands(from0, 2.07, peSide, 30)), { c: 30 });
 
     }
@@ -950,7 +1015,7 @@
       place(`${SEG_LABEL[sg_.type]} S:${fmt1(sg_.len)}M`, 2.07, sideCands(sl, 2.07, -peSide).concat(sideCands(sl, 2.07, peSide, 30)), { c: SEG_COLOR[sg_.type] });
     });
     if (ABAN) {   // CAP 마감 표기 (철거·포장 글자를 먼저 붙인 뒤 남은 자리)
-      const cp = V.add(DP[DP.length - 1], V.mul(V.norm(V.sub(DP[DP.length - 1], DP[DP.length - 2])), 1.0)), cands = [];
+      const cp = TW(SVC.C), cands = [];
       [[3, 2], [-3, 3], [3, -4], [-3, -4], [6, 5], [-6, 5], [6, -7], [-6, -7], [0, 7], [0, -8], [9, 0], [-9, 0]].forEach(o_ => cands.push({ p: V.add(cp, o_), align: o_[0] >= 0 ? 'L' : 'L' }));
       place(`${ND}A CAP마감`, 2.07, cands.map(cd => ({ p: cd.p[0] < cp[0] ? V.add(cd.p, [-tW(`${ND}A CAP마감`, 2.07), 0]) : cd.p, align: 'L' })), { c: 6 });
     }
@@ -1294,8 +1359,8 @@
   }
 
   // 수정할 때마다 올림 (웹 화면 제목 옆에 표시)
-  const VERSION = 'v1.24 (2026-11-25)', VERSION_NOTE = '상세도 배관이 수요처 빨간 외곽선을 넘지 않게, 폐지 종단 추가거리를 존치 길이(기존−철거)로, 제원표 글자를 칸 안에 맞춤';
-  return { VERSION, VERSION_NOTE, guessMainPipe, readGisDxf, guessPipeLayer, snapTee, readOrderSheet, splitAddr, buildDrawing, writeDxf, buildPdf, baseKeyFor, decodeLines, SEG_LABEL };
+  const VERSION = 'v1.26 (2026-11-25)', VERSION_NOTE = '폐지: 수치지도 기존 인입관에서 부지경계 쪽 철거 구간만 지우고 CAP(ㄷ) 표시, 상세도를 인입관 중심으로 크게';
+  return { VERSION, VERSION_NOTE, findService, snapAbandon, guessMainPipe, readGisDxf, guessPipeLayer, snapTee, readOrderSheet, splitAddr, buildDrawing, writeDxf, buildPdf, baseKeyFor, decodeLines, SEG_LABEL };
 });
 
 </script>
@@ -1389,16 +1454,26 @@ function setKind(k){
   $('lbMain').textContent=ab?'본관(기존관) 관경 (A)':'기존관 관경 (A)';
   $('lbNew').textContent=ab?'폐지 인입관 관경 (A)':'신설 인입관 관경 (A)';
   $('lbSegs').textContent=ab?'철거 굴착 구간 포장 (분기점 쪽)':'포장 구간 (분기점 → 건물 순서)';
-  $('hint3').textContent=ab?'폐지는 분기점 쪽에서 철거 연장만큼 굴착·철거하고 CAP 마감, 나머지 기존 인입관은 존치로 그립니다. 제원표는 기존·철거·합계(존치)로 작성됩니다. 본관 관경은 수치지도 배관 주기(예: PE160)에서 자동으로 채워지며, 다르면 고쳐 주세요.'
+  $('hint3').textContent=ab?'폐지는 수치지도의 기존 인입관을 그대로 두고, 부지경계(인입관 끝)에서 철거 연장만큼 분기점 쪽 지점에 CAP(ㄷ) 마감을 표시합니다. 철거 구간은 기존관에서 지우고 가는 점선으로 표시합니다. 본관 관경과 기존 인입관 연장은 수치지도에서 자동으로 채워지며, 다르면 고쳐 주세요.'
     :'인입관 심도는 기존관 심도 − 0.1M, 지반고는 40.3으로 고정해 관정고를 계산합니다. 보호철판은 분기 지점에 항상 표시됩니다.';
   $('mapHint').innerHTML=ab?'지도에서 <b>폐지할 인입관이 본관에서 갈라지는 곳</b>을 클릭하세요. 본관 위에 분기점이 잡히고, 클릭한 쪽을 건물 쪽으로 봅니다(본관 바로 위보다 건물 쪽으로 살짝 떨어뜨려 찍으세요). '
-    +'폐지는 <b>분기점 한 번만 찍으면 됩니다</b>. 디테일뷰에는 분기점에서 철거 연장만큼만 그리고 CAP 마감으로 끝냅니다. 기존 인입관 경로를 평면도에 표시하고 싶을 때만 이어서 점을 찍으세요. (휠: 확대/축소, 드래그: 이동)'
+    +'폐지는 <b>분기점 한 번만 찍으면 됩니다</b>. 수치지도에 그려진 기존 인입관을 자동으로 찾아, 부지경계 쪽 끝에서 철거 연장만큼 들어온 지점에 CAP 마감을 표시합니다. 수치지도에 기존 인입관이 없을 때만 이어서 점을 찍어 경로를 그려 주세요. (휠: 확대/축소, 드래그: 이동)'
     :MAPHINT0;
   updRouteInfo(); drawMap();
 }
 document.querySelectorAll('input[name=kind]').forEach(r=>r.onchange=()=>setKind(kind()));
-function autoMain(){ if(kind()==='abandon' && S.tee && S.gis && !$('vMain').value){ const g=E.guessMainPipe(S.gis,S.tee.foot); if(g){ $('vMain').value=g.dia; S.mainMat=g.mat; toast(`본관 관경을 수치지도 주기에서 ${g.mat}${g.dia}A로 채웠습니다`); } } }
-$('vExist').oninput=()=>{ updRouteInfo(); drawMap(); };
+function autoMain(){
+  if(kind()!=='abandon' || !S.tee || !S.gis) return;
+  const msg=[];
+  if(!$('vMain').value){ const g=E.guessMainPipe(S.gis,S.tee.foot); if(g){ $('vMain').value=g.dia; S.mainMat=g.mat; msg.push(`본관 ${g.mat}${g.dia}A`); } }
+  // 수치지도에서 분기점에 이어진 기존 인입관을 찾아 길이를 기존 연장으로 (직접 입력한 값은 유지)
+  const sv=E.findService(S.gis,S.pipeLayer,S.tee.foot,S.tee.dir); S.svcFound=!!sv;
+  if(sv && (!$('vExist').value || $('vExist').dataset.auto==='1')){ $('vExist').value=Math.round(sv.len*10)/10; $('vExist').dataset.auto='1'; msg.push(`기존 인입관 ${Math.round(sv.len*10)/10}M(수치지도)`); }
+  if(msg.length) toast(msg.join(', ')+'를 채웠습니다');
+  if(!sv) toast('수치지도에서 이어진 기존 인입관을 못 찾았습니다. 기존 인입관 연장을 직접 입력하세요.');
+  updRouteInfo();
+}
+$('vExist').oninput=()=>{ $('vExist').dataset.auto=''; updRouteInfo(); drawMap(); };
 $('teeInfo').onclick=()=>{ if(kind()==='abandon' && S.routeLen){ $('vExist').value=Math.round(S.routeLen*10)/10; updRouteInfo(); drawMap(); toast('지도상 경로 길이를 기존 인입관 연장에 넣었습니다'); } };
 
 /* ---------- 포장 구간 편집 */
@@ -1510,7 +1585,7 @@ cv.addEventListener('mouseup',e=>{
   if(drag && !drag.moved && S.gis && S.pipeLayer){
     const w=s2w([e.offsetX,e.offsetY]);
     if(!S.tee){
-      const t=E.snapTee(S.gis,S.pipeLayer,w);
+      const t=kind()==='abandon'?E.snapAbandon(S.gis,S.pipeLayer,w):E.snapTee(S.gis,S.pipeLayer,w);
       if(t){ S.tee=t; S.route=null; $('st2').classList.add('done'); autoMain(); }
     } else {
       if(!S.route||!S.route.length) S.route=[S.tee.foot];
